@@ -1,0 +1,25 @@
+[
+	{
+
+		"usedevice": true,
+		"platform": "Win64",
+		"role": "Server",
+		"name": "Local Server",
+		"address": "127.0.0.1",
+		"username": "root",
+		"password": "kt50v_hd",
+		"deploymentpath": "PD3-Play-Test-Server",
+		"arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Verbose, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -matchmakinggroup 999977722 -port=9999 -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
+	},
+	{
+		"usedevice": true,
+		"platform": "Win64",
+		"role": "Client",
+		"name": "Local Client",
+		"address": "127.0.0.1",
+		"username": "root",
+		"password": "kt50v_hd",
+		"deploymentpath": "PD3-Play-Test-Client",
+		"arguments": ""
+	}
+]
