@@ -101,7 +101,7 @@ namespace DeploymentTool
             // 
             // btnAbort
             // 
-            this.btnAbort.Location = new System.Drawing.Point(525, 528);
+            this.btnAbort.Location = new System.Drawing.Point(528, 528);
             this.btnAbort.Name = "btnAbort";
             this.btnAbort.Size = new System.Drawing.Size(75, 23);
             this.btnAbort.TabIndex = 4;
@@ -113,7 +113,7 @@ namespace DeploymentTool
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1032, 559);
+            this.ClientSize = new System.Drawing.Size(1032, 569);
             this.Controls.Add(this.btnAbort);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.label1);

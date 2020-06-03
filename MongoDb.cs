@@ -66,8 +66,8 @@ namespace DeploymentTool
 
 		public MongoDb()
 		{
-			Client = new MongoClient(ConnectionString);
-			Database = Client.GetDatabase(DataBaseName);
+            Client = new MongoClient(ConnectionString);
+            Database = Client.GetDatabase(DataBaseName);
 		}
 
 		public List<BuildRecord> SelectAvailableBuilds(FilterDefinition<BuildRecord> Filter)

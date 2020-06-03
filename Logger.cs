@@ -91,23 +91,26 @@ namespace DeploymentTool
 
 		private void Write(string Text)
 		{
-			//ListView.SetObjects(DeviceList);
+            lock (this)
+            {
+                //ListView.SetObjects(DeviceList);
 
-			if (!File.Exists(LogFile))
-			{
-				// Create a file to write to.
-				using (StreamWriter FileWriter = File.CreateText(LogFile))
-				{
-					FileWriter.WriteLine(Text);
-				}
-			}
-			else
-			{
-				using (StreamWriter FileWriter = File.AppendText(LogFile))
-				{
-					FileWriter.WriteLine(Text);
-				}
-			}
+                if (!File.Exists(LogFile))
+                {
+                    // Create a file to write to.
+                    using (StreamWriter FileWriter = File.CreateText(LogFile))
+                    {
+                        FileWriter.WriteLine(Text);
+                    }
+                }
+                else
+                {
+                    using (StreamWriter FileWriter = File.AppendText(LogFile))
+                    {
+                        FileWriter.WriteLine(Text);
+                    }
+                }
+            }
 		}
 
 		private static string GetLogFilePath()

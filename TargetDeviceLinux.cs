@@ -78,24 +78,32 @@ namespace DeploymentTool
 		private CancellationToken Token;
 		public Device DeviceConfig { get; }
 
-		public TargetDeviceLinux(Device DeviceConfig, ILogger Logger)
+		public TargetDeviceLinux(Device DeviceConfig, BuildNode Build, ILogger Logger)
 		{
-			this.Logger = Logger;
+            this.Build = Build;
+            this.Logger = Logger;
 			this.DeviceConfig = DeviceConfig;
 			this.Connection = new ConnectionInfo(DeviceConfig.Address, DeviceConfig.Username,
 					new PasswordAuthenticationMethod(DeviceConfig.Username, DeviceConfig.Password));
 			this.Command = new Shell(new SshClient(Connection));
 		}
 
-		public bool DeployBuild(IDeploymentCallback Callback, BuildNode Build, CancellationToken Token)
+        public bool Ping()
+        {
+            return NetworkHelper.PingDevice(DeviceConfig.Address, Logger);
+        }
+
+        public bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
 		{
 			this.Callback = Callback;
-			this.Build = Build;
 			this.Token = Token;
 
 			try
 			{
-				ResetProgress();
+				if (!ResetProgress())
+                {
+                    return CheckCancelationRequestAndReport();
+                }
 
 				if (!StopProcesses())
 				{
@@ -126,7 +134,7 @@ namespace DeploymentTool
 			return CheckCancelationRequestAndReport();
 		}
 
-		private void ResetProgress()
+		private bool ResetProgress()
 		{
 			Logger.Info(string.Format("Start deploying build {0} to device {1}", Build.Number, DeviceConfig.Address));
 
@@ -136,7 +144,9 @@ namespace DeploymentTool
 			DeviceConfig.Progress = 0;
 			DeviceConfig.Status = "";
 			DeviceConfig.ProgressMax = Directory.GetFiles(Build.Path, "*", SearchOption.AllDirectories).Length + ProgressStopProcess + ProgressStartProcess;
-		}
+
+            return Ping();
+        }
 
 		private bool CheckCancelationRequestAndReport()
 		{
@@ -202,6 +212,12 @@ namespace DeploymentTool
 			return false;
 		}
 
+        public bool StopProcess()
+        {
+            string ProcessName = GetLinuxDedicatedProcessName();
+            return StopProcess(ProcessName);
+        }
+
 		private bool StopProcesses()
 		{
 			try
@@ -249,7 +265,9 @@ namespace DeploymentTool
 			var BuildInfoStringList = BuildInfo.Name.Split('-').Select(x => { return x; }).ToList();
 			if (BuildInfoStringList.Count() < 3)
 			{
-				throw new Exception(string.Format("Build folder name '{0}' does not contain expected fields.", Build.Path));
+                // @HACK needs to be fixed.
+                return "ShooterGame";
+				//throw new Exception(string.Format("Build folder name '{0}' does not contain expected fields.", Build.Path));
 			}
 
 			string GameProjectName = BuildInfoStringList[2];
@@ -293,6 +311,13 @@ namespace DeploymentTool
 			return false;
 		}
 
+        public bool IsProcessRunning()
+        {
+            string ProcessName = GetLinuxDedicatedProcessName();
+
+            return IsProcessRunning(ProcessName);
+        }
+
 		private bool IsProcessRunning(string ProcessName)
 		{
 			var CommandResult = Command.Execute(string.Format("pidof {0}", ProcessName));
@@ -314,7 +339,7 @@ namespace DeploymentTool
 			return (ProcessCount > 0);
 		}
 
-		private bool StartProcess()
+		public bool StartProcess()
 		{
 			string LinuxServerProcessName = GetLinuxDedicatedProcessName();
 
@@ -332,31 +357,85 @@ namespace DeploymentTool
 				Logger.Info(string.Format("Starting dedicated server process '{0}' on Linux machine: {1}. Cmd Line Args: {2}", LinuxServerProcessName, DeviceConfig.Address, DeviceConfig.CmdLineArguments));
 				// Get the full path including the build directory.
 				string FullBuildDeploymentPath = GetFullBuildDeploymentPath();
-				// Get the name of the shell script to start the Linux dedicated server.
-				string LinuxStartServerShell = string.Format("{0}Server.sh", GetGameProjectName());
+
+                string CrashReportClientPath = Path.Combine(FullBuildDeploymentPath, "Engine", "Binaries", "Linux").Replace("\\", "/");
+                // Change access permissions for  crash report client
+                Command.Execute(string.Format("chmod u+x {0}/CrashReportClient", CrashReportClientPath));
+                // Get the name of the shell script to start the Linux dedicated server.
+                string LinuxStartServerShell = string.Format("{0}Server.sh", GetGameProjectName());
 				// Set Working Directory
 				Command.Execute(string.Format("pushd {0}", FullBuildDeploymentPath));
 				// Change access permissions so that we can start the dedicated server
 				Command.Execute(string.Format("chmod u+x {0}/{1}", FullBuildDeploymentPath, LinuxStartServerShell));
 				// Start the dedicated Linux server.
-				new Task(() => Command.ExecuteAsync(string.Format("{0}/{1} {2} {3}", FullBuildDeploymentPath, LinuxStartServerShell, DeviceConfig.CmdLineArguments, "-server"))).Start();
+				//new Task(() => Command.ExecuteAsync(string.Format("{0}/{1} {2} -crashreports -core", FullBuildDeploymentPath, LinuxStartServerShell, DeviceConfig.CmdLineArguments))).Start();
 				// @Hack Lets give the async task some time to execute our request before checking if the server has started.
-				Thread.Sleep(5000);
+				//Thread.Sleep(6000);
 
-				// Increase progress when start process is finished.
-				DeviceConfig.Progress++;
+                string SshCommandArguments = string.Format("{0}/{1} {2} -crashreports -core", FullBuildDeploymentPath, LinuxStartServerShell, DeviceConfig.CmdLineArguments);
 
-				if (IsProcessRunning(LinuxServerProcessName))
+                SshCommand.ExecuteAsync(Logger, SshCommandArguments, this);
+
+                var StartTime = DateTime.Now;
+
+                int ProcessID = GetProcessID();
+
+                const int ProcessStartedTimeThreshold = 20;
+
+                // Spin and check if process started for maximum of 20 seconds.
+                while (ProcessID == -1 && (DateTime.Now - StartTime).TotalSeconds < ProcessStartedTimeThreshold)
+                {
+                    Thread.Sleep(250);
+
+                    ProcessID = GetProcessID();
+                }
+
+                // Increase progress when start process is finished.
+                DeviceConfig.Progress++;
+
+                if (GetProcessID() == -1)
+                {
+                    Logger.Error(string.Format("Failed to start process '{0}' for build '{1}' on target device '{2}'", LinuxServerProcessName, Build.Number, DeviceConfig.Address));
+                    return false;
+                }
+
+                if (SetProcessAffinity() == false)
+                {
+                    Logger.Error(string.Format("Failed to set process affinity '{0}' for process '{1}' with process id '{2}' on Linux device '{3}'", DeviceConfig.CpuAffinity, LinuxServerProcessName, ProcessID, DeviceConfig.Address));
+                    return false;
+                }
+
+                Logger.Info(string.Format("Start process '{0}' successful for build '{1}' on target device '{2}'", LinuxServerProcessName, Build.Number, DeviceConfig.Address));
+                return true;
+
+
+
+
+
+                /*
+
+
+
+                // Increase progress when start process is finished.
+                DeviceConfig.Progress++;
+
+                int ProcessID = GetProcessID();
+
+                if (ProcessID > 0)
+				//if (IsProcessRunning(LinuxServerProcessName))
 				{
+                    SetProcessAffinity();
+
 					Logger.Info(string.Format("Start process '{0}' successful for build '{1}' on target device '{2}'", LinuxServerProcessName, Build.Number, DeviceConfig.Address));
 					return true;
 				}
 
 				Logger.Error(string.Format("Failed to start process '{0}' for build '{1}' on target device '{2}'", LinuxServerProcessName, Build.Number, DeviceConfig.Address));
-
-				return false;
-			}
-			catch(Exception e)
+                
+                return false;
+                */
+            }
+            catch (Exception e)
 			{
 				Logger.Error(string.Format("Start process '{0}' threw an exception for build '{1}' on target device '{2}'. Ex: {3}", LinuxServerProcessName, Build.Number, DeviceConfig.Address, e.Message));
 			}
@@ -364,7 +443,31 @@ namespace DeploymentTool
 			return false;
 		}
 
-		private string GetLinuxDedicatedProcessName()
+        private bool SetProcessAffinity()
+        {
+            int ProcessID = GetProcessID();
+            if (ProcessID == -1)
+            {
+                return false;
+            }
+
+            string ReturnValue = string.Empty, LogInfo = string.Empty, LogError = string.Empty;
+
+            var CmdResult = SshCommand.ExecuteCommand(Logger, string.Format("taskset -cp {0} {1}", DeviceConfig.CpuAffinity, ProcessID), this, out ReturnValue, out LogInfo, out LogError);
+
+            Logger.Info(string.Format("Process Affinity Command Result: {0}. {1}. {2}. {3} for process {4}({5}) on device {6}", ReturnValue, LogInfo, LogInfo, LogError, GetLinuxDedicatedProcessName(), ProcessID, DeviceConfig.Address));
+
+            if (CmdResult == CommandResult.Success)
+            {
+                Logger.Info(string.Format("Process affinity for process '{0}' set to '{1}'", GetLinuxDedicatedProcessName(), DeviceConfig.CpuAffinity));
+                return true;
+            }
+
+            Logger.Error(string.Format("Failed to set process affinity '{0}' for process '{1}'. {2}. {3}. {4}", DeviceConfig.CpuAffinity, GetLinuxDedicatedProcessName(), ReturnValue, LogInfo, LogError));
+            return false;
+        }
+
+        private string GetLinuxDedicatedProcessName()
 		{
 			string LinuxServerProcessName = string.Format("{0}Server", GetGameProjectName());
 
@@ -470,5 +573,44 @@ namespace DeploymentTool
 			}
 		}
 
-	}
+        public int GetProcessID()
+        {
+            int ProcessID = -1;
+
+            string ReturnValue = string.Empty, LogInfo = string.Empty, LogError = string.Empty;
+
+            try
+            {
+                var CmdResult = SshCommand.ExecuteCommand(Logger, string.Format("pidof {0}", GetLinuxDedicatedProcessName()), this, out ReturnValue, out LogInfo, out LogError);
+                if (CmdResult == CommandResult.Failure)
+                {
+                    return ProcessID;
+                }
+
+                string[] ProcessIds = ReturnValue.Split(' ');
+
+                foreach (var ProcessId in ProcessIds)
+                {
+                    if (string.IsNullOrEmpty(ProcessId))
+                    {
+                        continue;
+                    }
+
+                    int.TryParse(ProcessId, out ProcessID);
+                }
+
+                if (ProcessID > 0)
+                {
+                    return ProcessID;
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Warning(string.Format("Failed to get process id for process '{0}' on Linux device '{1}'. {2}. {3}. {4}. Ex: {5}", GetLinuxDedicatedProcessName(), DeviceConfig.Address, ReturnValue, LogInfo, LogError, e.Message));
+            }
+
+            return ProcessID;
+        }
+
+    }
 }

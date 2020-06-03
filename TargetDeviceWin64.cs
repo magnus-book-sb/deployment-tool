@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -13,8 +14,123 @@ using System.Threading.Tasks;
 
 namespace DeploymentTool
 {
-	public static class NetworkShare
+    class WindowsProcess : IPsExecCallback
+    {
+        private ILogger Logger;
+        private Device DeviceConfig;
+        private string ProcessName;
+        private string CommandArgument;
+       
+        public WindowsProcess(ILogger Logger, Device DeviceConfig, string ProcessName, string CommandArgument)
+        {
+            this.Logger = Logger;
+            this.DeviceConfig = DeviceConfig;
+            this.ProcessName = ProcessName;
+            this.CommandArgument = CommandArgument;
+        }
+
+        public void OnExecuteFinished(int ExitCode)
+        {
+            Console.WriteLine(string.Format("Process {0} exited {1}", ProcessName, ExitCode));
+            //Logger.Info(string.Format("Process {0} exited {1}", ProcessName, ExitCode));
+        }
+
+        public void OnReceivedErrorOutput(string Text)
+        {
+            if (!string.IsNullOrEmpty(Text))
+            {
+                Console.WriteLine(string.Format("Process {0} received error {1}", ProcessName, Text));
+                //Logger.Error(string.Format("Process {0} received error {1}", ProcessName, Text));
+            }
+        }
+
+        public void OnReceivedInfoOutput(string Text)
+        {
+            if (!string.IsNullOrEmpty(Text))
+            {
+                Console.WriteLine(string.Format("Process {0} received info {1}", ProcessName, Text));
+                //Logger.Info(string.Format("Process {0} received info {1}", ProcessName, Text));
+            }
+        }
+
+        public bool StartProcess()
+        {
+            string PsExecArgument = string.Format(@"\\{0} -c -u {1} -p {2} {3} {4}", 
+                DeviceConfig.Address, DeviceConfig.Username, DeviceConfig.Password, ProcessName, CommandArgument);
+
+            PsExec PsExecTool = new PsExec(Logger, this);
+            int ExitCode = PsExecTool.Execute(PsExecArgument);
+
+            return (ExitCode == 0);
+        }
+
+        public bool StopProcess()
+        {
+            return true;
+        }
+
+
+    }
+    
+
+
+	public static class NetworkHelper
 	{
+
+        public static bool IsLocalAddress(string Address)
+        {
+            if (Address.Equals("127.0.0.1"))
+            {
+                return true;
+            }
+
+            var Host = Dns.GetHostEntry(Dns.GetHostName());
+
+            foreach (var LocalAddress in Host.AddressList)
+            {
+                if (LocalAddress.AddressFamily == AddressFamily.InterNetwork && LocalAddress.ToString().Equals(Address))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public static bool PingDevice(string Address, ILogger Logger)
+        {
+            try
+            {
+                if (IsLocalAddress(Address))
+                {
+                    return true; // return true if we are local address why ping our self?
+                }
+
+                bool IsAvailable = false;
+
+                using (var ping = new Ping())
+                {
+                    PingReply Reply = ping.Send(Address);
+                    IsAvailable = Reply.Status == IPStatus.Success;
+                }
+
+                if (IsAvailable)
+                {
+                    Logger.Info(string.Format("Device {0} responded to ping request", Address));
+
+                    return true;
+                }
+
+                Logger.Error(string.Format("Device {0}, did not respond to Ping request", Address));
+            }
+            catch (Exception e)
+            {
+                Logger.Error(string.Format("Pinging device '{0}' failed. Ex: {1}", Address, e.Message));
+            }
+
+            return false;
+        }
+
 		/// <summary>
 		/// Connects to the remote share
 		/// </summary>
@@ -169,23 +285,29 @@ namespace DeploymentTool
 		private CancellationToken Token;
 		public Device DeviceConfig { get; }
 
-		public TargetDeviceWin64(Device DeviceConfig, ILogger Logger)
+		public TargetDeviceWin64(Device DeviceConfig, BuildNode Build, ILogger Logger)
 		{
-			this.Logger = Logger;
+            this.Build = Build;
+            this.Logger = Logger;
 			this.DeviceConfig = DeviceConfig;
 		}
 
-		
+        public bool Ping()
+        {
+            return NetworkHelper.PingDevice(DeviceConfig.Address, Logger);
+        }
 
-		public bool DeployBuild(IDeploymentCallback Callback, BuildNode Build, CancellationToken Token)
+        public bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
 		{
 			this.Callback = Callback;
-			this.Build = Build;
 			this.Token = Token;
 
 			try
 			{
-				ResetProgress();
+				if (!ResetProgress())
+                {
+                    return CheckCancelationRequestAndReport();
+                }
 
 				if (!StopProcesses())
 				{
@@ -197,10 +319,11 @@ namespace DeploymentTool
 					return CheckCancelationRequestAndReport();
 				}
 
-				if (!StartProcess())
-				{
-					return CheckCancelationRequestAndReport();
-				}
+                // Only start downloaded servers automatically
+                if (Build.Role.Equals(Role.Server.ToString()) && !StartProcess())
+                {
+                    return CheckCancelationRequestAndReport();
+                }
 
 				Logger.Info(string.Format("Build {0} successfully deployed to Win64 machine {1}", Build.Number, DeviceConfig.Address));
 
@@ -241,11 +364,11 @@ namespace DeploymentTool
 
 			var DeploymentPath = GetDeploymentPath();
 
-			NetworkShare.ConnectToShare(DeploymentPath.FullName, DeviceConfig.Username, DeviceConfig.Password);
+			NetworkHelper.ConnectToShare(DeploymentPath.FullName, DeviceConfig.Username, DeviceConfig.Password);
 
 			bool InstallResult = InstallBuild(DeploymentPath);
 
-			NetworkShare.DisconnectFromShare(DeploymentPath.FullName, true);
+            NetworkHelper.DisconnectFromShare(DeploymentPath.FullName, true);
 
 			return InstallResult;
 		}
@@ -375,23 +498,17 @@ namespace DeploymentTool
 			var BuildInfoStringList = BuildInfo.Name.Split('-').Select(x => { return x; }).ToList();
 			if (BuildInfoStringList.Count() < 3)
 			{
-				throw new Exception(string.Format("Build folder name '{0}' does not contain expected fields.", Build.Path));
+                // @Hack please fix me
+				return "ShooterGame";
 			}
 
 			string GameProjectName = BuildInfoStringList[2];
 			return GameProjectName;
 		}
 
-		private bool StartProcess()
+		public bool StartProcess()
 		{
 			DeviceConfig.Progress++;
-
-			if (Build.Role.Equals(Role.Client.ToString()))
-			{
-				// Just return true if we are client we do not want to start the process on the client but treat it as success.
-				return true;
-			}
-
 			DeviceConfig.Status = "Starting Process";
 
 			var ExecutablePath = GetExecutablePath(Build.Solution);
@@ -405,6 +522,9 @@ namespace DeploymentTool
 
 				Logger.Info(string.Format("Starting process '{0}'", ExecutablePath.FullName));
 
+                //WindowsProcess WinProc = new WindowsProcess(Logger, DeviceConfig, ExecutablePath.FullName, DeviceConfig.CmdLineArguments);
+                //WinProc.StartProcess();
+                
 				var ManagementScope = CreateManagementScope();
 
 				if (ManagementScope == null)
@@ -445,8 +565,10 @@ namespace DeploymentTool
 						}
 					}
 				}
+                
+                DeviceConfig.Progress++;
 
-				return true;
+                return true;
 			}
 			catch(Exception e)
 			{
@@ -456,26 +578,29 @@ namespace DeploymentTool
 			return false;
 		}
 
-		private void ResetProgress()
+		private bool ResetProgress()
 		{
 			Logger.Info(string.Format("Start deploying build {0} to device {1}", Build.Number, DeviceConfig.Address));
 
-			const int ProgressStopProcess = 2;
-			const int ProgressStartProcess = 2;
+			int ProgressStopProcess  = Build.Role.Equals(Role.Server.ToString()) ? 2 : 0;
+            int ProgressStartProcess = Build.Role.Equals(Role.Server.ToString()) ? 2 : 0;
+            int ProgressInstallBuild = 2;
 
 			DeviceConfig.Progress = 0;
 			DeviceConfig.Status = "";
-			DeviceConfig.ProgressMax = Directory.GetFiles(Build.Path, "*", SearchOption.AllDirectories).Length + ProgressStopProcess + ProgressStartProcess;
+			DeviceConfig.ProgressMax = Directory.GetFiles(Build.Path, "*", SearchOption.AllDirectories).Length + ProgressStopProcess + ProgressStartProcess + ProgressInstallBuild;
+
+            return Ping();
 		}
 
 		private bool StopProcesses()
 		{
-			DeviceConfig.Status = "Stopping Processes";
-			DeviceConfig.Progress++;
-
 			if (Build.Role.Equals(Role.Server.ToString()))
 			{
-				Logger.Info(string.Format("Stopping any running Win64 server process on target device '{0}'", DeviceConfig.Address));
+                DeviceConfig.Status = "Stopping Processes";
+                DeviceConfig.Progress++;
+
+                Logger.Info(string.Format("Stopping any running Win64 server process on target device '{0}'", DeviceConfig.Address));
 
 				var ManagementScope = CreateManagementScope();
 
@@ -502,10 +627,26 @@ namespace DeploymentTool
 				{
 					return false;
 				}
-			}
+
+                DeviceConfig.Progress++;
+            }
 
 			return true;
 		}
+
+        public bool StopProcess()
+        {
+            var ManagementScope = CreateManagementScope();
+
+            if (ManagementScope == null)
+            {
+                return false;
+            }
+
+            string ProcessName = GetProcessName(Build.Solution);
+
+            return StopProcess(ProcessName, ManagementScope);
+        }
 
 		private bool StopProcess(string ProcessName, ManagementScope Scope)
 		{
@@ -544,6 +685,21 @@ namespace DeploymentTool
 			return false;
 		}
 
+        public bool IsProcessRunning()
+        {
+            var ManagementScope = CreateManagementScope();
+
+            if (ManagementScope == null)
+            {
+                return false;
+            }
+
+            string ProcessName = GetProcessName(Build.Solution);
+
+            return IsProcessRunning(ProcessName, ManagementScope);
+        }
+
+
 		private bool IsProcessRunning(string ProcessName, ManagementScope Scope)
 		{
 			var Query = new SelectQuery(string.Format("select * from Win32_process where name = '{0}'", ProcessName));
@@ -565,7 +721,7 @@ namespace DeploymentTool
 			{
 				ManagementScope Scope = null;
 
-				if (IsLocalAddress())
+				if (NetworkHelper.IsLocalAddress(DeviceConfig.Address))
 				{
 					Logger.Info(string.Format("Creating management scope to local host '{0}'", DeviceConfig.Address));
 
@@ -596,26 +752,6 @@ namespace DeploymentTool
 			return null;
 		}
 
-		private bool IsLocalAddress()
-		{
-			if (DeviceConfig.Address.Equals("127.0.0.1"))
-			{
-				return true;
-			}
-
-			var Host = Dns.GetHostEntry(Dns.GetHostName());
-
-			foreach (var Address in Host.AddressList)
-			{
-				if (Address.AddressFamily == AddressFamily.InterNetwork && Address.ToString().Equals(DeviceConfig.Address)) 
-				{
-					return true;
-				}
-			}
-
-			return false;
-		}
-
 		private string GetProcessName(string BuildSolution)
 		{
 			if (Build.Role.Equals(Role.Server.ToString()))
@@ -633,7 +769,7 @@ namespace DeploymentTool
 				return "ShooterGameServer-Win64-Shipping.exe";
 			}
 
-			if (BuildSolution.Equals(Solution.Development.ToString()))
+			if (BuildSolution.Equals(Solution.Development.ToString()) || BuildSolution.Equals("Unknown"))
 			{
 				return "ShooterGame.exe";
 			}

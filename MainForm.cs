@@ -10,92 +10,103 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Microsoft.VisualBasic;
 
 namespace DeploymentTool
 {
-	public partial class MainForm : Form, IDeploymentCallback
-	{
-		private List<BuildRoleNode> BuildList = new List<BuildRoleNode>();
 
-		private MongoDb MongoDatabase = null;
+    public partial class MainForm : Form, IDeploymentCallback
+    {
+        private List<BuildMachineNode> BuildList = new List<BuildMachineNode>();
 
-		private List<Device> ServerDeviceList = new List<Device>();
+        private MongoDb MongoDatabase = null;
 
-		private Device SelectedServerDevice = null;
+        private List<Device> ServerDeviceList = new List<Device>();
 
-		private List<DeploymentSession> DeploySessions = new List<DeploymentSession>();
+        private Device SelectedServerDevice = null;
 
-		public MainForm()
-		{
-			InitializeComponent();
+        private List<DeploymentSession> DeploySessions = new List<DeploymentSession>();
 
-			CreateBuildView();
+        private string LocalStagedBuildPath = string.Empty;
 
-			CreateServerDeviceView();
-		}
+        public MainForm()
+        {
+            InitializeComponent();
 
-		public void OnFileDeployed(ITargetDevice Device, string SourceFile)
-		{
-			ThreadHelperClass.UpdateDeviceDeploymentProgress(this, ServerView, Device.DeviceConfig, ServerDeviceList);
-		}
+            CreateBuildView();
 
-		public void OnBuildDeployed(ITargetDevice Device, BuildNode Build)
-		{
-			DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
+            CreateServerDeviceView();
+        }
 
-			ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Success);
-		}
+        public void OnFileDeployed(ITargetDevice Device, string SourceFile)
+        {
+            ThreadHelperClass.UpdateDeviceDeploymentProgress(this, ServerView, Device.DeviceConfig, ServerDeviceList);
+        }
 
-		public void OnBuildDeployedError(ITargetDevice Device, BuildNode Build, string ErrorMessage)
-		{
-			DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
+        public void OnBuildDeployed(ITargetDevice Device, BuildNode Build)
+        {
+            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
 
-			ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Failure);
-		}
+            ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Success);
+        }
 
-		public void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build)
-		{
-			DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
+        public void OnBuildDeployedError(ITargetDevice Device, BuildNode Build, string ErrorMessage)
+        {
+            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
 
-			ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Aborted);
-		}
+            ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Failure);
+        }
 
+        public void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build)
+        {
+            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
 
-		private void MainForm_Load(object sender, EventArgs e)
-		{
-			this.MongoDatabase = new MongoDb();
+            ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Aborted);
+        }
 
-			LoadBuildView();
+        private void MainForm_Load(object sender, EventArgs e)
+        {
+            try
+            {
+                this.MongoDatabase = new MongoDb();
 
-			LoadServerDeviceView();
-		}
+                LoadBuildView();
 
-		public object ImageGetter(object Object)
-		{
-			var Build = Object as BuildNode;
+                LoadServerDeviceView();
+            }
+            catch(Exception ex)
+            {
+                MessageBox.Show(string.Format("Failed to load deployment tool with error {0}", ex.Message));
+            }
+        }
 
-			if (Build == null || string.IsNullOrEmpty(Build.AutomatedTestStatus))
-			{
-				return null;
-			}
+        public object ImageGetter(object Object)
+        {
+            var Build = Object as BuildNode;
 
-			if (Build.AutomatedTestStatus.Equals("Passed"))
-			{
-				return 0;
-			}
+            if (Build == null || string.IsNullOrEmpty(Build.AutomatedTestStatus))
+            {
+                return null;
+            }
 
-			if (Build.AutomatedTestStatus.Equals("Failed"))
-			{
-				return 1;
-			}
+            if (Build.AutomatedTestStatus.Equals("Passed"))
+            {
+                return 0;
+            }
 
-			return null;
-		}
+            if (Build.AutomatedTestStatus.Equals("Failed"))
+            {
+                return 1;
+            }
 
-		private void CreateBuildView()
+            return null;
+        }
+
+        private void CreateBuildView()
 		{
 			try
 			{
@@ -103,20 +114,24 @@ namespace DeploymentTool
 				BuildImageList.Images.Add("green32", Image.FromFile(@"green32.png"));
 				BuildImageList.Images.Add("red32", Image.FromFile(@"red32.png"));
 
-				BuildView.Columns.Clear();
-				BuildView.SmallImageList = BuildImageList;
-				BuildView.CellEditActivation = BrightIdeasSoftware.TreeListView.CellEditActivateMode.SingleClickAlways;
-				BuildView.FullRowSelect = true;
-				BuildView.CheckBoxes = true;
-				BuildView.CanExpandGetter = x => (x as BuildRoleNode != null) ? (x as BuildRoleNode).Children.Count > 0 : ((x as BuildPlatformNode != null) ? (x as BuildPlatformNode).Children.Count > 0 : ((x as BuildSolutionNode != null) ? (x as BuildSolutionNode).Children.Count > 0 : false));
-				BuildView.ChildrenGetter = x => (x as BuildRoleNode != null) ? new ArrayList((x as BuildRoleNode).Children) : ((x as BuildPlatformNode != null) ? new ArrayList((x as BuildPlatformNode).Children) : ((x as BuildSolutionNode != null) ? new ArrayList((x as BuildSolutionNode).Children) : null));
+                ContextMenu RightClickMenu = new ContextMenu();
+                RightClickMenu.MenuItems.Add("Refresh Builds", new EventHandler(BuildViewRightClickMenuEventHandler));
 
-				var BuildRoleColumn = new BrightIdeasSoftware.OLVColumn("Role", "Role");
-				BuildRoleColumn.Width = 150;
-				BuildRoleColumn.IsEditable = false;
-				BuildRoleColumn.ImageGetter += new ImageGetterDelegate(ImageGetter);
-				BuildRoleColumn.AspectGetter = x => (x as BuildRoleNode != null ? (x as BuildRoleNode).Role : ((x as BuildPlatformNode != null ? (x as BuildPlatformNode).Platform : ((x as BuildSolutionNode != null ? (x as BuildSolutionNode).Solution : string.Empty)))));
-				BuildView.Columns.Add(BuildRoleColumn);
+                BuildView.Columns.Clear();
+                BuildView.OwnerDraw = true;
+                BuildView.ContextMenu = RightClickMenu;
+				BuildView.SmallImageList = BuildImageList;
+                BuildView.CellEditActivation = BrightIdeasSoftware.TreeListView.CellEditActivateMode.SingleClickAlways;
+				BuildView.CheckBoxes = true;
+                BuildView.CanExpandGetter = x => (x as BuildMachineNode != null ? (x as BuildMachineNode).Children.Count > 0 : ((x as BuildRoleNode != null) ? (x as BuildRoleNode).Children.Count > 0 : ((x as BuildPlatformNode != null) ? (x as BuildPlatformNode).Children.Count > 0 : ((x as BuildSolutionNode != null) ? (x as BuildSolutionNode).Children.Count > 0 : false))));
+                BuildView.ChildrenGetter = x => (x as BuildMachineNode != null) ? new ArrayList((x as BuildMachineNode).Children) : ((x as BuildRoleNode != null) ? new ArrayList((x as BuildRoleNode).Children) : ((x as BuildPlatformNode != null) ? new ArrayList((x as BuildPlatformNode).Children) : ((x as BuildSolutionNode != null) ? new ArrayList((x as BuildSolutionNode).Children) : null)));
+
+                var MachineNameColumn = new BrightIdeasSoftware.OLVColumn("Machine", "Machine");
+                MachineNameColumn.Width = 150;
+                MachineNameColumn.IsEditable = false;
+                MachineNameColumn.ImageGetter += new ImageGetterDelegate(ImageGetter);
+                MachineNameColumn.AspectGetter = x => (x as BuildMachineNode != null ? (x as BuildMachineNode).Machine : ((x as BuildRoleNode != null ? (x as BuildRoleNode).Role : ((x as BuildPlatformNode != null ? (x as BuildPlatformNode).Platform : ((x as BuildSolutionNode != null ? (x as BuildSolutionNode).Solution : string.Empty)))))));
+                BuildView.Columns.Add(MachineNameColumn);
 				
 				var BuildColumn = new BrightIdeasSoftware.OLVColumn("Build", "Build");
 				BuildColumn.Width = 100;
@@ -148,10 +163,106 @@ namespace DeploymentTool
 			}
 		}
 
-		private void CreateServerDeviceView()
+        public void BuildViewRightClickMenuEventHandler(object sender, EventArgs e)
+        {
+            var MachineNode = BuildView.SelectedItem.RowObject as BuildMachineNode;
+            if (MachineNode != null)
+            {
+                if (MachineNode.Machine.Equals(System.Environment.MachineName.ToUpper()))
+                {
+                    LocalStagedBuildPath = Interaction.InputBox("Staged Build Path", "Supply Path", LocalStagedBuildPath, -1, -1);
+
+                    if (string.IsNullOrEmpty(LocalStagedBuildPath))
+                    {
+                        return;
+                    }
+
+                    if (!Directory.Exists(LocalStagedBuildPath))
+                    {
+                        MessageBox.Show(string.Format("Supplied path '{0}' not valid", LocalStagedBuildPath), "Invalid Staged Build Path", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        LocalStagedBuildPath = string.Empty;
+                        return;
+                    }
+                }
+
+                LoadBuildView();
+            }
+        }
+
+        public void DeviceViewRightClickMenuEventHandler(object sender, EventArgs e)
+        {
+            if (ServerView.SelectedItem == null)
+            {
+                return;
+            }
+
+            var RightClickMenuItem = sender as MenuItem;
+
+            try
+            {
+                var SelectedDevice = ServerView.SelectedItem.RowObject as Device;
+
+                var DeploySession = DeploySessions.Find(x => x.Device.Equals(SelectedDevice));
+
+                string SelectedMenu = RightClickMenuItem.Text;
+
+                if (SelectedMenu.Equals("Open Log"))
+                {
+                    OpenLogFile(SelectedDevice);
+                }
+                else if(SelectedMenu.Equals("Abort Deployment"))
+                {
+                    if (DeploySession != null)
+                    {
+                        DeploySession.Abort();
+                    }
+                }
+                else
+                {
+                    if (SelectedDevice.Status == null || !SelectedDevice.Status.Equals(BuildDeploymentResult.Success.ToString()))
+                    {
+                        MessageBox.Show(string.Format("Cannot open device information until build has been deployed successfully"), "", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                        return;
+                    }
+
+                    var DeviceInfoForm = new DeviceForm();
+                    DeviceInfoForm.DeviceConfig = new Device(SelectedDevice.UseDevice, SelectedDevice.Platform, SelectedDevice.Role, SelectedDevice.Name, SelectedDevice.Address, SelectedDevice.Username, SelectedDevice.Password, SelectedDevice.CpuAffinity, SelectedDevice.DeploymentPath, SelectedDevice.CmdLineArguments, SelectedDevice.Build);
+                    var Result = DeviceInfoForm.ShowDialog();
+                }
+            }
+            catch (Exception Ex)
+            {
+                MessageBox.Show(string.Format("{0} error. {1}", RightClickMenuItem.Text, Ex.Message), "Exception", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void OpenLogFile(Device SelectedDevice)
+        {
+            string LogFile = string.Empty;
+
+            try
+            {
+                LogFile = FileLogger.GetLogFile(SelectedDevice);
+
+                Process.Start(LogFile);
+            }
+            catch (Exception Ex)
+            {
+                MessageBox.Show(string.Format("Failed to open log file {0}. {1}", LogFile, Ex.Message), "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void CreateServerDeviceView()
 		{
-			ServerView.Columns.Clear();
+            ContextMenu RightClickMenu = new ContextMenu();
+            RightClickMenu.MenuItems.Add("Open Device", new EventHandler(DeviceViewRightClickMenuEventHandler));
+            RightClickMenu.MenuItems.Add("Open Log", new EventHandler(DeviceViewRightClickMenuEventHandler));
+            RightClickMenu.MenuItems.Add("Abort Deployment", new EventHandler(DeviceViewRightClickMenuEventHandler));
+            
+            ServerView.Columns.Clear();
 			ServerView.OwnerDraw = true;
+            ServerView.ContextMenu = RightClickMenu;
 			ServerView.CellEditActivation = BrightIdeasSoftware.TreeListView.CellEditActivateMode.SingleClickAlways;
 			ServerView.CheckBoxes = true;
 			ServerView.CellEditStarting += new CellEditEventHandler(OnServerDeviceViewCellEditingStarting);
@@ -183,37 +294,42 @@ namespace DeploymentTool
 			ServerView.Columns.Add(StatusColumn);
 
 			var PlatformColumn = new BrightIdeasSoftware.OLVColumn("Platform", "Platform");
-			PlatformColumn.Width = 100;
+			PlatformColumn.Width = 70;
 			PlatformColumn.AspectGetter = x => (x as Device).Platform;
 			ServerView.Columns.Add(PlatformColumn);
 
 			var RoleColumn = new BrightIdeasSoftware.OLVColumn("Role", "Role");
-			RoleColumn.Width = 100;
+			RoleColumn.Width = 70;
 			RoleColumn.AspectGetter = x => (x as Device).Role;
 			ServerView.Columns.Add(RoleColumn);
 
 			var AddressColumn = new BrightIdeasSoftware.OLVColumn("Address", "Address");
-			AddressColumn.Width = 100;
+			AddressColumn.Width = 90;
 			AddressColumn.AspectGetter = x => (x as Device).Address;
 			ServerView.Columns.Add(AddressColumn);
 
 			var NameColumn = new BrightIdeasSoftware.OLVColumn("Name", "Name");
-			NameColumn.Width = 100;
+			NameColumn.Width = 150;
 			NameColumn.AspectGetter = x => (x as Device).Name;
 			ServerView.Columns.Add(NameColumn);
 
 			var UserNameColumn = new BrightIdeasSoftware.OLVColumn("User Name", "User Name");
-			UserNameColumn.Width = 100;
+			UserNameColumn.Width = 80;
 			UserNameColumn.AspectGetter = x => (x as Device).Username;
 			ServerView.Columns.Add(UserNameColumn);
 
 			var PasswordColumn = new BrightIdeasSoftware.OLVColumn("Password", "Password");
-			PasswordColumn.Width = 100;
+			PasswordColumn.Width = 80;
 			PasswordColumn.AspectGetter = x => (x as Device).Password;
 			ServerView.Columns.Add(PasswordColumn);
 
-			var TargetPathColumn = new BrightIdeasSoftware.OLVColumn("Deployment Path", "Deployment Path");
-			TargetPathColumn.Width = 400;
+            var CpuAffinityColumn = new BrightIdeasSoftware.OLVColumn("CPU Affinity", "CPU Affinity");
+            CpuAffinityColumn.Width = 80;
+            CpuAffinityColumn.AspectGetter = x => (x as Device).CpuAffinity;
+            ServerView.Columns.Add(CpuAffinityColumn);
+
+            var TargetPathColumn = new BrightIdeasSoftware.OLVColumn("Deployment Path", "Deployment Path");
+			TargetPathColumn.Width = 200;
 			TargetPathColumn.AspectGetter = x => (x as Device).DeploymentPath;
 			ServerView.Columns.Add(TargetPathColumn);
 
@@ -238,15 +354,8 @@ namespace DeploymentTool
 
 				if (ServerDeviceList.Count() - index <= 1)
 				{
-					ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty));
-				}
-
-				if (e.Column.Text.Equals("Use Device"))
-				{
-					var LogButton = new Button { Bounds = e.CellBounds };
-					LogButton.Text = "...";
-					LogButton.Click += new EventHandler(OnServerDeviceViewTargetLogButtonClickedEvent);
-					e.Control = LogButton;
+					ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
+                    ServerView.SetObjects(ServerDeviceList);
 				}
 
 				if (e.Column.Text.Equals("Platform"))
@@ -285,7 +394,17 @@ namespace DeploymentTool
 					e.Control = PasswordTextBox;
 				}
 
-				if (e.Column.Text.Equals("Deployment Path"))
+                if (e.Column.Text.Equals("CPU Affinity"))
+                {
+                    var CpuAffinityNumericUpDown = new NumericUpDown { Bounds = e.CellBounds };
+                    CpuAffinityNumericUpDown.Minimum = 0;
+                    CpuAffinityNumericUpDown.Maximum = 64;
+                    CpuAffinityNumericUpDown.GotFocus += new EventHandler(OnDeviceViewCpuAffinityNumericUpDownClicked);
+                    CpuAffinityNumericUpDown.LostFocus += new EventHandler(OnDeviceViewCpuAffinityNumericUpDownValidating);
+                    e.Control = CpuAffinityNumericUpDown;
+                }
+
+                if (e.Column.Text.Equals("Deployment Path"))
 				{
 					var DeploymentPathTextBox = new TextBox { Bounds = e.CellBounds };
 					DeploymentPathTextBox.Text = SelectedServerDevice.DeploymentPath;
@@ -309,7 +428,26 @@ namespace DeploymentTool
 			}
 		}
 
-		private CheckState UseServerDeviceAspectPutter(object Object, CheckState Value)
+        private void OnDeviceViewCpuAffinityNumericUpDownClicked(object sender, EventArgs e)
+        {
+            NumericUpDown CpuAffinityNumericUpDown = sender as NumericUpDown;
+            if (CpuAffinityNumericUpDown != null && SelectedServerDevice != null)
+            {
+                CpuAffinityNumericUpDown.Value = SelectedServerDevice.CpuAffinity;
+            }
+        }
+
+        private void OnDeviceViewCpuAffinityNumericUpDownValidating(object sender, EventArgs e)
+        {
+            NumericUpDown CpuAffinityNumericUpDown = sender as NumericUpDown;
+            if (CpuAffinityNumericUpDown != null)
+            {
+                SelectedServerDevice.CpuAffinity = (int)CpuAffinityNumericUpDown.Value;
+                ServerView.RefreshObject(SelectedServerDevice);
+            }
+        }
+
+        private CheckState UseServerDeviceAspectPutter(object Object, CheckState Value)
 		{
 			var SelectedDevice = Object as Device;
 			if (SelectedDevice != null)
@@ -335,22 +473,6 @@ namespace DeploymentTool
 		private object ProgressUpdateAspectGetter(object Object)
 		{
 			return string.Format("{0} %", CalculateProgressPercentage(Object as Device));
-		}
-
-		private void OnServerDeviceViewTargetLogButtonClickedEvent(object sender, EventArgs e)
-		{
-			string LogFile = string.Empty;
-
-			try
-			{
-				LogFile = FileLogger.GetLogFile(SelectedServerDevice);
-
-				Process.Start(LogFile);
-			}
-			catch(Exception Ex)
-			{
-				MessageBox.Show(string.Format("Failed to open log file {0}. {1}", LogFile, Ex.Message), "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-			}
 		}
 
 		private int CalculateProgressPercentage(Device SelectedDevice)
@@ -471,28 +593,132 @@ namespace DeploymentTool
 			return PlatformNode;
 		}
 
-		private void LoadBuildView()
+        private void LoadBuildView()
 		{
 			BuildList.Clear();
 			BuildView.ClearObjects();
-			
-			BuildRoleNode ServerNode = new BuildRoleNode("Server");
-			ServerNode.Children.Add(CreatePlatformNode(Platform.Linux, Role.Server));
-			ServerNode.Children.Add(CreatePlatformNode(Platform.Win64, Role.Server));
+            
+            var BuildServerNode = CreateBuildMachineNode();
+            var LocalhostNode = CreateLocalHostNode();
 
-			BuildRoleNode ClientNode = new BuildRoleNode("Client");
-			ClientNode.Children.Add(CreatePlatformNode(Platform.Win64, Role.Client));
-			ClientNode.Children.Add(CreatePlatformNode(Platform.XboxOne, Role.Client));
-			ClientNode.Children.Add(CreatePlatformNode(Platform.PS4, Role.Client));
+            BuildList.Add(BuildServerNode);
+            BuildList.Add(LocalhostNode);
 
-			BuildList.Add(ServerNode);
-			BuildList.Add(ClientNode);
-
-			BuildView.Roots = BuildList;
+            BuildView.Roots = BuildList;
 			BuildView.Refresh();
-		}
+        }
 
-		private void LoadServerDeviceView()
+        private BuildMachineNode CreateBuildMachineNode()
+        {
+            BuildMachineNode BuildServerNode = new BuildMachineNode("SEH-DLAN-01");
+
+            BuildRoleNode ServerNode = new BuildRoleNode("Server");
+            ServerNode.Children.Add(CreatePlatformNode(Platform.Linux, Role.Server));
+            ServerNode.Children.Add(CreatePlatformNode(Platform.Win64, Role.Server));
+
+            BuildRoleNode ClientNode = new BuildRoleNode("Client");
+            ClientNode.Children.Add(CreatePlatformNode(Platform.Win64, Role.Client));
+            ClientNode.Children.Add(CreatePlatformNode(Platform.XboxOne, Role.Client));
+            ClientNode.Children.Add(CreatePlatformNode(Platform.PS4, Role.Client));
+
+            BuildServerNode.Children.Add(ServerNode);
+            BuildServerNode.Children.Add(ClientNode);
+
+            return BuildServerNode;
+        }
+
+        private BuildPlatformNode CreatePlatformNode(string Platform, string Role, string[] BuildDirectories)
+        {
+            var PlatformNode = new BuildPlatformNode(Platform);
+
+            var DevelopmentBuild = new BuildSolutionNode("Development");
+            var TestBuild = new BuildSolutionNode("Test");
+            var ShippingBuild = new BuildSolutionNode("Shipping");
+            var UnknownBuild = new BuildSolutionNode("Unknown");
+
+            foreach (var  BuildDirectory in BuildDirectories)
+            {
+                DirectoryInfo BuildDirectoryInfo = new DirectoryInfo(BuildDirectory);
+                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("binaries") || BuildDirectoryInfo.Parent.ToString().ToLower().Equals("build"))
+                {
+                    continue;
+                }
+
+                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("development"))
+                {
+                    DevelopmentBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Development", Role, ""));
+                    continue;
+                }
+
+                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("test"))
+                {
+                    TestBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Test", Role, ""));
+                    continue;
+                }
+
+                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("shipping"))
+                {
+                    ShippingBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Shipping", Role, ""));
+                    continue;
+                }
+
+                UnknownBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Unknown", Role, ""));
+            }
+
+            PlatformNode.Children.Add(DevelopmentBuild);
+            PlatformNode.Children.Add(TestBuild);
+            PlatformNode.Children.Add(ShippingBuild);
+            PlatformNode.Children.Add(UnknownBuild);
+
+            return PlatformNode;
+        }
+
+        private BuildMachineNode CreateLocalHostNode()
+        {
+            BuildMachineNode LocalHostNode = new BuildMachineNode(System.Environment.MachineName);
+
+            BuildRoleNode ServerNode = new BuildRoleNode("Server");
+            BuildRoleNode ClientNode = new BuildRoleNode("Client");
+
+            var CurrentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
+
+            if (string.IsNullOrEmpty(LocalStagedBuildPath) && CurrentDirectory.Parent != null && CurrentDirectory.Parent.Parent != null && CurrentDirectory.Parent.Parent.Name.Equals("UE4"))
+            {
+                LocalStagedBuildPath = Path.Combine(CurrentDirectory.Parent.Parent.FullName, "ShooterGame", "Saved", "StagedBuilds");
+
+                if (!Directory.Exists(LocalStagedBuildPath))
+                {
+                    LocalStagedBuildPath = string.Empty;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(LocalStagedBuildPath))
+            {
+                var LinuxServerBuilds = Directory.GetDirectories(LocalStagedBuildPath, "LinuxServer", SearchOption.AllDirectories);
+                ServerNode.Children.Add(CreatePlatformNode("Linux", "Server", LinuxServerBuilds));
+
+                var WindowServerBuilds = Directory.GetDirectories(LocalStagedBuildPath, "WindowsServer", SearchOption.AllDirectories);
+                ServerNode.Children.Add(CreatePlatformNode("Win64", "Server", WindowServerBuilds));
+
+                var XboxOneBuilds = Directory.GetDirectories(LocalStagedBuildPath, "XboxOne", SearchOption.AllDirectories);
+                ClientNode.Children.Add(CreatePlatformNode("XboxOne", "Client", XboxOneBuilds));
+
+                var PS4Builds = Directory.GetDirectories(LocalStagedBuildPath, "PS4", SearchOption.AllDirectories);
+                ClientNode.Children.Add(CreatePlatformNode("PS4", "Client", PS4Builds));
+
+                var WindowClientBuilds = Directory.GetDirectories(LocalStagedBuildPath, "WindowsNoEditor", SearchOption.AllDirectories);
+                ClientNode.Children.Add(CreatePlatformNode("Win64", "Client", WindowClientBuilds));
+            }
+
+            LocalHostNode.Children.Add(ServerNode);
+            LocalHostNode.Children.Add(ClientNode);
+
+            return LocalHostNode;
+        }
+
+        
+
+        private void LoadServerDeviceView()
 		{
 			ServerDeviceList.Clear();
 			ServerView.ClearObjects();
@@ -514,7 +740,7 @@ namespace DeploymentTool
 
 			foreach (var ServerDevice in ServerDevices)
 			{
-				var DeviceNode = new Device(ServerDevice.UseDevice, ServerDevice.Platform, ServerDevice.Role, ServerDevice.Name, ServerDevice.Address, ServerDevice.Username, ServerDevice.Password, ServerDevice.DeploymentPath, ServerDevice.CmdLineArguments);
+				var DeviceNode = new Device(ServerDevice.UseDevice, ServerDevice.Platform, ServerDevice.Role, ServerDevice.Name, ServerDevice.Address, ServerDevice.Username, ServerDevice.Password, ServerDevice.CpuAffinity, ServerDevice.DeploymentPath, ServerDevice.CmdLineArguments);
 
 				if (ServerDevice.UseDevice)
 				{
@@ -524,7 +750,7 @@ namespace DeploymentTool
 				ServerDeviceList.Add(DeviceNode);
 			}
 
-			ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty));
+			ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
 			ServerView.SetObjects(ServerDeviceList);
 		}
 
@@ -539,10 +765,10 @@ namespace DeploymentTool
 
 			SaveDevices();
 
-			DeploymentBuilds();
+			DeployBuilds();
 		}
 
-		private void DeploymentBuilds()
+		private void DeployBuilds()
 		{
 			try
 			{
@@ -579,11 +805,25 @@ namespace DeploymentTool
 
 					if (SelectedDevice.Role.Equals(Role.Server.ToString()))
 					{
+                        if (SelectedServerBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) == null)
+                        {
+                            MessageBox.Show("Build platform and device platform mismatch.", "Deployment Failure", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                            continue;
+                        }
+
 						Deploy(SelectedDevice, SelectedServerBuilds);
 					}
 					else
 					{
-						Deploy(SelectedDevice, SelectedClientBuilds);
+                        if (SelectedClientBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) == null)
+                        {
+                            MessageBox.Show("Build platform and device platform mismatch.", "Deployment Failure", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                            continue;
+                        }
+
+                        Deploy(SelectedDevice, SelectedClientBuilds);
 					}
 				}
 			}
@@ -618,7 +858,8 @@ namespace DeploymentTool
 			var SelectedBuild = SelectedBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) as BuildNode;
 			if (SelectedBuild != null)
 			{
-				var Session = new DeploymentSession(this, this, SelectedDevice, ServerView, ServerDeviceList);
+                SelectedDevice.Build = SelectedBuild;
+                var Session = new DeploymentSession(this, this, SelectedDevice, ServerView, ServerDeviceList);
 				DeploySessions.Add(Session);
 				var Task = Session.Deploy(SelectedBuild);
 			}
@@ -690,6 +931,7 @@ namespace DeploymentTool
 			return true;
 		}
 
+
 		private bool IsValidBuildSelection(List<object> SelectedBuilds, Platform Platform)
 		{
 			var SelectedPlatformBuilds = SelectedBuilds.ToList().FindAll(x => (x as BuildNode).Platform.Equals(Platform.ToString()));
@@ -716,7 +958,7 @@ namespace DeploymentTool
 				MessageBox.Show(string.Format("Failed to save devices {0}", e.Message), "Save Devices Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 
-			ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty));
+			ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
 		}
 
 		private string GetDeviceConfigFile()
@@ -750,10 +992,22 @@ namespace DeploymentTool
 
 			foreach (var DeploySession in DeploySessions)
 			{
-				DeploySession.Abort();
-			}
+                DeploySession.Abort();
+            }
 		}
+
 	}
+
+    public class BuildMachineNode
+    {
+        public string Machine { get; set; }
+        public List<BuildRoleNode> Children { get; set; }
+        public BuildMachineNode(string MachineName)
+        {
+            this.Machine = MachineName;
+            this.Children = new List<BuildRoleNode>();
+        }
+    }
 
 	public class BuildRoleNode
 	{
@@ -812,4 +1066,52 @@ namespace DeploymentTool
 		}
 	}
 
+
+    public class DirectoryHelper
+    {
+        public static List<string> GetDirectories(string Search)
+        {
+            List<string> FoundDirectories = new List<string>();
+
+            string[] Drives = System.Environment.GetLogicalDrives();
+
+            foreach (string Drive in Drives)
+            {
+                System.IO.DriveInfo CurrentDriveInfo = new System.IO.DriveInfo(Drive);
+
+                if (!CurrentDriveInfo.IsReady)
+                {
+                    continue;
+                }
+
+                WalkDirectoryTree(Search, CurrentDriveInfo.RootDirectory, FoundDirectories);
+            }
+
+            return FoundDirectories;
+        }
+
+        static private void WalkDirectoryTree(string Search, System.IO.DirectoryInfo RootDirectory, List<string> FoundDirectories)
+        {
+            System.IO.DirectoryInfo[]  SubDirs = RootDirectory.GetDirectories();
+
+            foreach (System.IO.DirectoryInfo SubDir in SubDirs)
+            {
+                try
+                {
+                    if (SubDir.Name.Equals(Search))
+                    {
+                        FoundDirectories.Add(SubDir.FullName);
+
+                        continue;
+                    }
+
+                    WalkDirectoryTree(Search, SubDir, FoundDirectories);
+                }
+                catch (UnauthorizedAccessException e)
+                {
+                }
+            }
+        }
+
+    }
 }

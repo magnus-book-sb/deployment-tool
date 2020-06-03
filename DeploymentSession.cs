@@ -21,9 +21,31 @@ namespace DeploymentTool
 
 	public interface ITargetDevice
 	{
+        bool Ping();
 		Device DeviceConfig { get; }
-		bool DeployBuild(IDeploymentCallback Callback, BuildNode Build, CancellationToken Token);
-	}
+		bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token);
+        bool IsProcessRunning();
+        bool StartProcess();
+        bool StopProcess();
+    }
+
+    public class DeviceFactory
+    {
+        public static ITargetDevice CreateTargetDevice(Device DeviceConfig, BuildNode Build, ILogger Logger)
+        {
+            if (DeviceConfig.Platform.Equals("Linux"))
+            {
+                return new TargetDeviceLinux(DeviceConfig, Build, Logger); 
+            }
+
+            if (DeviceConfig.Platform.Equals("Win64"))
+            {
+                return new TargetDeviceWin64(DeviceConfig, Build, Logger);
+            }
+
+            return null;
+        }
+    }
 
 	public class DeploymentSession
 	{
@@ -39,9 +61,13 @@ namespace DeploymentTool
 
 		private CancellationTokenSource CancellationTaskTokenSource;
 
-		public Device Device;
+		public Device Device { get; private set; }
 
-		public DeploymentSession(Form MainForm, IDeploymentCallback Callback, Device Device, ObjectListView ListView, List<Device> DeviceList)
+        public BuildNode Build { get; private set; }
+
+        public ITargetDevice TargetDevice { get; private set; }
+
+        public DeploymentSession(Form MainForm, IDeploymentCallback Callback, Device Device, ObjectListView ListView, List<Device> DeviceList)
 		{
 			this.MainForm = MainForm;
 			this.Callback = Callback;
@@ -52,7 +78,8 @@ namespace DeploymentTool
 
 		public async Task<bool> Deploy(BuildNode Build)
 		{
-			ITargetDevice TargetDevice = CreateTargetDevice(Device);
+            this.Build = Build;
+			this.TargetDevice = DeviceFactory.CreateTargetDevice(Device, Build, new FileLogger(Device, ListView, DeviceList));;
 
 			if (TargetDevice == null)
 			{
@@ -62,7 +89,7 @@ namespace DeploymentTool
 
 			CancellationTaskTokenSource = new CancellationTokenSource();
 
-			DeploymentTask = Task.Run(() => TargetDevice.DeployBuild(Callback, Build, CancellationTaskTokenSource.Token), CancellationTaskTokenSource.Token);
+			DeploymentTask = Task.Run(() => TargetDevice.DeployBuild(Callback, CancellationTaskTokenSource.Token), CancellationTaskTokenSource.Token);
 
 			await DeploymentTask;
 
@@ -81,20 +108,7 @@ namespace DeploymentTool
 			}
 		}
 
-		private ITargetDevice CreateTargetDevice(Device DeviceConfig)
-		{
-			if (DeviceConfig.Platform.Equals("Linux"))
-			{
-				return new TargetDeviceLinux(DeviceConfig, new FileLogger(DeviceConfig, ListView, DeviceList));
-			}
-
-			if (DeviceConfig.Platform.Equals("Win64"))
-			{
-				return new TargetDeviceWin64(DeviceConfig, new FileLogger(DeviceConfig, ListView, DeviceList));
-			}
-
-			return null;
-		}
+		
 	}
 
 	

@@ -11,7 +11,7 @@ namespace DeploymentTool
 {
 	public class ThreadHelperClass
 	{
-		delegate void UpdateDeviceDeploymentProgressDelegate(Form form, ObjectListView ListView, Device DeviceConfig, List<Device> DeviceList);
+        delegate void UpdateDeviceDeploymentProgressDelegate(Form form, ObjectListView ListView, Device DeviceConfig, List<Device> DeviceList);
 		public static void UpdateDeviceDeploymentProgress(Form form, ObjectListView listView, Device deviceConfig, List<Device> deviceList)
 		{
 			if (form.InvokeRequired)
