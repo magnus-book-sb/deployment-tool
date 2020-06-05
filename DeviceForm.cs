@@ -28,7 +28,7 @@ namespace DeploymentTool
         private void DeviceForm_Load(object sender, EventArgs e)
         {
             this.Text = string.Format("Device - {0} {1}", DeviceConfig.Name, DeviceConfig.Address);
-            this.TargetDevice = DeviceFactory.CreateTargetDevice(DeviceConfig, DeviceConfig.Build, Logger);
+           // this.TargetDevice = DeviceFactory.CreateTargetDevice(DeviceConfig, DeviceConfig.Build, null, Logger);
 
             FillDeviceStatus();
         }

@@ -30,13 +30,13 @@ namespace DeploymentTool
 		{
             this.components = new System.ComponentModel.Container();
             this.BuildView = new BrightIdeasSoftware.TreeListView();
-            this.ServerView = new BrightIdeasSoftware.ObjectListView();
             this.btnDeploy = new System.Windows.Forms.Button();
             this.label1 = new System.Windows.Forms.Label();
             this.label2 = new System.Windows.Forms.Label();
             this.btnAbort = new System.Windows.Forms.Button();
+            this.DeviceView = new BrightIdeasSoftware.TreeListView();
             ((System.ComponentModel.ISupportInitialize)(this.BuildView)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.ServerView)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.DeviceView)).BeginInit();
             this.SuspendLayout();
             // 
             // BuildView
@@ -55,25 +55,9 @@ namespace DeploymentTool
             this.BuildView.View = System.Windows.Forms.View.Details;
             this.BuildView.VirtualMode = true;
             // 
-            // ServerView
-            // 
-            this.ServerView.CellEditUseWholeCell = false;
-            this.ServerView.Cursor = System.Windows.Forms.Cursors.Default;
-            this.ServerView.FullRowSelect = true;
-            this.ServerView.GridLines = true;
-            this.ServerView.HideSelection = false;
-            this.ServerView.Location = new System.Drawing.Point(12, 285);
-            this.ServerView.MultiSelect = false;
-            this.ServerView.Name = "ServerView";
-            this.ServerView.ShowGroups = false;
-            this.ServerView.Size = new System.Drawing.Size(1008, 237);
-            this.ServerView.TabIndex = 0;
-            this.ServerView.UseCompatibleStateImageBehavior = false;
-            this.ServerView.View = System.Windows.Forms.View.Details;
-            // 
             // btnDeploy
             // 
-            this.btnDeploy.Location = new System.Drawing.Point(434, 528);
+            this.btnDeploy.Location = new System.Drawing.Point(432, 722);
             this.btnDeploy.Name = "btnDeploy";
             this.btnDeploy.Size = new System.Drawing.Size(75, 23);
             this.btnDeploy.TabIndex = 1;
@@ -101,7 +85,7 @@ namespace DeploymentTool
             // 
             // btnAbort
             // 
-            this.btnAbort.Location = new System.Drawing.Point(528, 528);
+            this.btnAbort.Location = new System.Drawing.Point(522, 722);
             this.btnAbort.Name = "btnAbort";
             this.btnAbort.Size = new System.Drawing.Size(75, 23);
             this.btnAbort.TabIndex = 4;
@@ -109,22 +93,37 @@ namespace DeploymentTool
             this.btnAbort.UseVisualStyleBackColor = true;
             this.btnAbort.Click += new System.EventHandler(this.btnAbort_Click);
             // 
+            // DeviceView
+            // 
+            this.DeviceView.CellEditUseWholeCell = false;
+            this.DeviceView.FullRowSelect = true;
+            this.DeviceView.GridLines = true;
+            this.DeviceView.HideSelection = false;
+            this.DeviceView.Location = new System.Drawing.Point(12, 287);
+            this.DeviceView.Name = "DeviceView";
+            this.DeviceView.ShowGroups = false;
+            this.DeviceView.Size = new System.Drawing.Size(1008, 429);
+            this.DeviceView.TabIndex = 5;
+            this.DeviceView.UseCompatibleStateImageBehavior = false;
+            this.DeviceView.View = System.Windows.Forms.View.Details;
+            this.DeviceView.VirtualMode = true;
+            // 
             // MainForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1032, 569);
+            this.ClientSize = new System.Drawing.Size(1031, 761);
+            this.Controls.Add(this.DeviceView);
             this.Controls.Add(this.btnAbort);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.label1);
-            this.Controls.Add(this.ServerView);
             this.Controls.Add(this.btnDeploy);
             this.Controls.Add(this.BuildView);
             this.Name = "MainForm";
             this.Text = "Starbreeze Internal Deployment Tool";
             this.Load += new System.EventHandler(this.MainForm_Load);
             ((System.ComponentModel.ISupportInitialize)(this.BuildView)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.ServerView)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.DeviceView)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -133,11 +132,11 @@ namespace DeploymentTool
 		#endregion
 
 		private BrightIdeasSoftware.TreeListView BuildView;
-		private BrightIdeasSoftware.ObjectListView ServerView;
 		private System.Windows.Forms.Button btnDeploy;
 		private System.Windows.Forms.Label label1;
 		private System.Windows.Forms.Label label2;
 		private System.Windows.Forms.Button btnAbort;
-	}
+        private BrightIdeasSoftware.TreeListView DeviceView;
+    }
 }
 

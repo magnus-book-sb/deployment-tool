@@ -21,13 +21,13 @@ namespace DeploymentTool
 
     public partial class MainForm : Form, IDeploymentCallback
     {
-        private List<BuildMachineNode> BuildList = new List<BuildMachineNode>();
+        private List<ProjectNode> BuildList = new List<ProjectNode>();
+
+        private List<PlatformNode> DeviceList = new List<PlatformNode>();
 
         private MongoDb MongoDatabase = null;
 
-        private List<Device> ServerDeviceList = new List<Device>();
-
-        private Device SelectedServerDevice = null;
+        private ITargetDevice SelectedDevice = null;
 
         private List<DeploymentSession> DeploySessions = new List<DeploymentSession>();
 
@@ -39,33 +39,33 @@ namespace DeploymentTool
 
             CreateBuildView();
 
-            CreateServerDeviceView();
+            CreateDeviceView();
         }
 
         public void OnFileDeployed(ITargetDevice Device, string SourceFile)
         {
-            ThreadHelperClass.UpdateDeviceDeploymentProgress(this, ServerView, Device.DeviceConfig, ServerDeviceList);
+            ThreadHelperClass.UpdateDeviceDeploymentProgress(this, DeviceView, Device);
         }
 
         public void OnBuildDeployed(ITargetDevice Device, BuildNode Build)
         {
-            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
+            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.Address) && x.Device.Role.Equals(Device.Role));
 
-            ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Success);
+            ThreadHelperClass.SetDeviceDeploymentResult(this, DeviceView, Device, BuildDeploymentResult.Success);
         }
 
         public void OnBuildDeployedError(ITargetDevice Device, BuildNode Build, string ErrorMessage)
         {
-            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
+            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.Address) && x.Device.Role.Equals(Device.Role));
 
-            ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Failure);
+            ThreadHelperClass.SetDeviceDeploymentResult(this, DeviceView, Device, BuildDeploymentResult.Failure);
         }
 
         public void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build)
         {
-            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.DeviceConfig.Address) && x.Device.Role.Equals(Device.DeviceConfig.Role));
+            DeploySessions.RemoveAll(x => x.Device.Address.Equals(Device.Address) && x.Device.Role.Equals(Device.Role));
 
-            ThreadHelperClass.SetDeviceDeploymentResult(this, ServerView, Device.DeviceConfig, ServerDeviceList, BuildDeploymentResult.Aborted);
+            ThreadHelperClass.SetDeviceDeploymentResult(this, DeviceView, Device, BuildDeploymentResult.Aborted);
         }
 
         private void MainForm_Load(object sender, EventArgs e)
@@ -76,7 +76,7 @@ namespace DeploymentTool
 
                 LoadBuildView();
 
-                LoadServerDeviceView();
+                LoadDeviceView();
             }
             catch(Exception ex)
             {
@@ -116,24 +116,30 @@ namespace DeploymentTool
 
                 ContextMenu RightClickMenu = new ContextMenu();
                 RightClickMenu.MenuItems.Add("Refresh Builds", new EventHandler(BuildViewRightClickMenuEventHandler));
-
+                
                 BuildView.Columns.Clear();
                 BuildView.OwnerDraw = true;
                 BuildView.ContextMenu = RightClickMenu;
-				BuildView.SmallImageList = BuildImageList;
+                BuildView.SmallImageList = BuildImageList;
                 BuildView.CellEditActivation = BrightIdeasSoftware.TreeListView.CellEditActivateMode.SingleClickAlways;
-				BuildView.CheckBoxes = true;
-                BuildView.CanExpandGetter = x => (x as BuildMachineNode != null ? (x as BuildMachineNode).Children.Count > 0 : ((x as BuildRoleNode != null) ? (x as BuildRoleNode).Children.Count > 0 : ((x as BuildPlatformNode != null) ? (x as BuildPlatformNode).Children.Count > 0 : ((x as BuildSolutionNode != null) ? (x as BuildSolutionNode).Children.Count > 0 : false))));
-                BuildView.ChildrenGetter = x => (x as BuildMachineNode != null) ? new ArrayList((x as BuildMachineNode).Children) : ((x as BuildRoleNode != null) ? new ArrayList((x as BuildRoleNode).Children) : ((x as BuildPlatformNode != null) ? new ArrayList((x as BuildPlatformNode).Children) : ((x as BuildSolutionNode != null) ? new ArrayList((x as BuildSolutionNode).Children) : null)));
+                BuildView.CheckBoxes = true;
+                BuildView.CanExpandGetter = x => (x as ProjectNode != null ? (x as ProjectNode).Children.Count > 0 : ((x as BuildMachineNode != null ? (x as BuildMachineNode).Children.Count > 0 : (x as BuildRoleNode != null) ? (x as BuildRoleNode).Children.Count > 0 : ((x as BuildPlatformNode != null) ? (x as BuildPlatformNode).Children.Count > 0 : ((x as BuildSolutionNode != null) ? (x as BuildSolutionNode).Children.Count > 0 : false)))));
+                BuildView.ChildrenGetter = x => (x as ProjectNode != null) ? new ArrayList((x as ProjectNode).Children) : ((x as BuildMachineNode != null) ? new ArrayList((x as BuildMachineNode).Children) : (x as BuildRoleNode != null) ? new ArrayList((x as BuildRoleNode).Children) : ((x as BuildPlatformNode != null) ? new ArrayList((x as BuildPlatformNode).Children) : ((x as BuildSolutionNode != null) ? new ArrayList((x as BuildSolutionNode).Children) : null)));
+
+                var ProjectNameColumn = new BrightIdeasSoftware.OLVColumn("Project", "Project");
+                ProjectNameColumn.Width = 150;
+                ProjectNameColumn.IsEditable = false;
+                ProjectNameColumn.ImageGetter += new ImageGetterDelegate(ImageGetter);
+                ProjectNameColumn.AspectGetter = x => (x as ProjectNode != null ? (x as ProjectNode).Project : ((x as BuildMachineNode != null ? (x as BuildMachineNode).Machine : (x as BuildRoleNode != null ? (x as BuildRoleNode).Role : ((x as BuildPlatformNode != null ? (x as BuildPlatformNode).Platform : ((x as BuildSolutionNode != null ? (x as BuildSolutionNode).Solution : string.Empty))))))));
+                BuildView.Columns.Add(ProjectNameColumn);
 
                 var MachineNameColumn = new BrightIdeasSoftware.OLVColumn("Machine", "Machine");
                 MachineNameColumn.Width = 150;
                 MachineNameColumn.IsEditable = false;
-                MachineNameColumn.ImageGetter += new ImageGetterDelegate(ImageGetter);
-                MachineNameColumn.AspectGetter = x => (x as BuildMachineNode != null ? (x as BuildMachineNode).Machine : ((x as BuildRoleNode != null ? (x as BuildRoleNode).Role : ((x as BuildPlatformNode != null ? (x as BuildPlatformNode).Platform : ((x as BuildSolutionNode != null ? (x as BuildSolutionNode).Solution : string.Empty)))))));
+                MachineNameColumn.AspectGetter = x => ((x as BuildMachineNode != null ? (x as BuildMachineNode).Machine : string.Empty)); // ((x as BuildRoleNode != null ? (x as BuildRoleNode).Role : ((x as BuildPlatformNode != null ? (x as BuildPlatformNode).Platform : ((x as BuildSolutionNode != null ? (x as BuildSolutionNode).Solution : string.Empty)))))));
                 BuildView.Columns.Add(MachineNameColumn);
-				
-				var BuildColumn = new BrightIdeasSoftware.OLVColumn("Build", "Build");
+
+                var BuildColumn = new BrightIdeasSoftware.OLVColumn("Build", "Build");
 				BuildColumn.Width = 100;
 				BuildColumn.IsEditable = false;
 				BuildColumn.AspectGetter = x => ((x as BuildNode != null ? (x as BuildNode).Number : string.Empty));
@@ -163,6 +169,168 @@ namespace DeploymentTool
 			}
 		}
 
+        public void DeviceViewRightClickCellEvent<CellRightClickEventArgs>(object Sender, CellRightClickEventArgs e)
+        {
+            if (DeviceView.SelectedObject as ITargetDevice != null)
+            {
+                ContextMenu RightClickMenu = new ContextMenu();
+                //RightClickMenu.MenuItems.Add("Open Device", new EventHandler(DeviceViewRightClickMenuEventHandler));
+                RightClickMenu.MenuItems.Add("Open Log", new EventHandler(DeviceViewRightClickMenuEventHandler));
+                RightClickMenu.MenuItems.Add("Abort Deployment", new EventHandler(DeviceViewRightClickMenuEventHandler));
+
+                if (DeploySessions.Find(x => x.Device.Equals(SelectedDevice)) == null && (DeviceView.SelectedObject as ITargetDevice).Build != null)
+                {
+                    RightClickMenu.MenuItems.Add("Start Application", new EventHandler(DeviceViewRightClickMenuEventHandler));
+                    RightClickMenu.MenuItems.Add("Stop Application", new EventHandler(DeviceViewRightClickMenuEventHandler));
+                }
+
+                DeviceView.ContextMenu = RightClickMenu;
+            }
+            /*
+            if (DeviceView.SelectedObject as BuildNode != null)
+            {
+                ContextMenu RightClickMenu = new ContextMenu();
+                RightClickMenu.MenuItems.Add("Start Application", new EventHandler(DeviceViewRightClickMenuEventHandler));
+                RightClickMenu.MenuItems.Add("Stop Application", new EventHandler(DeviceViewRightClickMenuEventHandler));
+                DeviceView.ContextMenu = RightClickMenu;
+            }
+            */
+        }
+
+        public void CreateDeviceView()
+        {
+            try
+            {
+                DeviceView.Columns.Clear();
+                DeviceView.OwnerDraw = true;
+                DeviceView.CellRightClick += new EventHandler<CellRightClickEventArgs>(DeviceViewRightClickCellEvent);
+                DeviceView.CellEditActivation = BrightIdeasSoftware.TreeListView.CellEditActivateMode.SingleClickAlways;
+                DeviceView.CheckBoxes = true;
+
+                DeviceView.CellEditStarting += new CellEditEventHandler(OnDeviceViewCellEditingStarting);
+                DeviceView.CanExpandGetter = new TreeListView.CanExpandGetterDelegate(CanExpandBuildView);
+                DeviceView.ChildrenGetter = new TreeListView.ChildrenGetterDelegate(BuildViewChildrenGetter); 
+                DeviceView.CheckStatePutter += new CheckStatePutterDelegate(UseServerDeviceAspectPutter);
+                DeviceView.CheckStateGetter += new CheckStateGetterDelegate(UseServerDeviceAspectGetter);
+
+                var UseDeviceColumn = new BrightIdeasSoftware.OLVColumn("Use Device", "Use Device");
+                UseDeviceColumn.Width = 90;
+                UseDeviceColumn.AspectGetter = x => (x as PlatformNode != null ? (x as PlatformNode).Platform : string.Empty);
+                DeviceView.Columns.Add(UseDeviceColumn);
+
+                var BuildColumn = new BrightIdeasSoftware.OLVColumn("Build", "Build");
+                BuildColumn.Width = 80;
+                BuildColumn.CheckBoxes = false;
+                BuildColumn.IsEditable = false;
+                BuildColumn.AspectGetter = x => (x as BuildNode != null ? (x as BuildNode).Number : string.Empty);
+                DeviceView.Columns.Add(BuildColumn);
+
+                var StatusColumn = new BrightIdeasSoftware.OLVColumn("Status", "Status");
+                StatusColumn.Width = 80;
+                StatusColumn.IsEditable = false;
+                StatusColumn.AspectGetter = x => (x as BuildNode != null ? (x as BuildNode).Status : string.Empty);
+                DeviceView.Columns.Add(StatusColumn);
+
+                var ProgressColumn = new BrightIdeasSoftware.OLVColumn("Progress", "Progress");
+                ProgressColumn.Width = 80;
+                ProgressColumn.IsEditable = false;
+                ProgressColumn.Renderer = new BarRenderer(0, 100);
+                ProgressColumn.AspectGetter += new AspectGetterDelegate(ProgressBarUpdateAspectGetter);
+                DeviceView.Columns.Add(ProgressColumn);
+                /*
+                var DeploymentColumn = new BrightIdeasSoftware.OLVColumn("Progress %", "Progress %");
+                DeploymentColumn.Width = 80;
+                DeploymentColumn.IsEditable = false;
+                DeploymentColumn.TextAlign = HorizontalAlignment.Center;
+                DeploymentColumn.AspectGetter += new AspectGetterDelegate(ProgressUpdateAspectGetter);
+                DeviceView.Columns.Add(DeploymentColumn);
+                */
+                var AddressColumn = new BrightIdeasSoftware.OLVColumn("Address", "Address");
+                AddressColumn.Width = 150;
+                AddressColumn.IsEditable = true;
+                AddressColumn.AspectGetter = x => ((x as Device != null ? (x as Device).Address : string.Empty));
+                DeviceView.Columns.Add(AddressColumn);
+
+                var RoleColumn = new BrightIdeasSoftware.OLVColumn("Role", "Role");
+                RoleColumn.Width = 70;
+                RoleColumn.IsEditable = true;
+                RoleColumn.AspectGetter = x => ((x as Device != null ? (x as Device).Role : string.Empty));
+                DeviceView.Columns.Add(RoleColumn);
+
+                var NameColumn = new BrightIdeasSoftware.OLVColumn("Name", "Name");
+                NameColumn.Width = 150;
+                NameColumn.IsEditable = true;
+                NameColumn.AspectGetter = x => ((x as Device != null ? (x as Device).Name : string.Empty));
+                DeviceView.Columns.Add(NameColumn);
+
+                var UserNameColumn = new BrightIdeasSoftware.OLVColumn("User Name", "User Name");
+                UserNameColumn.Width = 80;
+                UserNameColumn.IsEditable = true;
+                UserNameColumn.AspectGetter = x => ((x as Device != null ? (x as Device).Username : string.Empty));
+                DeviceView.Columns.Add(UserNameColumn);
+                
+                var PasswordColumn = new BrightIdeasSoftware.OLVColumn("Password", "Password");
+                PasswordColumn.Width = 80;
+                PasswordColumn.IsEditable = true;
+                PasswordColumn.AspectGetter = x => (x as Device != null ? (x as Device).Password : string.Empty);
+                DeviceView.Columns.Add(PasswordColumn);
+
+                var CpuAffinityColumn = new BrightIdeasSoftware.OLVColumn("CPU Affinity", "CPU Affinity");
+                CpuAffinityColumn.Width = 80;
+                CpuAffinityColumn.IsEditable = true;
+                CpuAffinityColumn.AspectGetter = x => (x as Device != null ? (x as Device).CpuAffinity : 0);
+                DeviceView.Columns.Add(CpuAffinityColumn);
+
+                var TargetPathColumn = new BrightIdeasSoftware.OLVColumn("Deployment Path", "Deployment Path");
+                TargetPathColumn.Width = 200;
+                TargetPathColumn.IsEditable = true;
+                TargetPathColumn.AspectGetter = x => (x as Device != null ? (x as Device).DeploymentPath : string.Empty);
+                DeviceView.Columns.Add(TargetPathColumn);
+
+                var ArgumentColumn = new BrightIdeasSoftware.OLVColumn("Cmd Line Argument", "Cmd Line Argument");
+                ArgumentColumn.Width = 200;
+                ArgumentColumn.IsEditable = true;
+                ArgumentColumn.AspectGetter = x => (x as Device != null ? (x as Device).CmdLineArguments : string.Empty);
+                DeviceView.Columns.Add(ArgumentColumn);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(string.Format("FillBuildView Ex: {0}", ex.Message));
+            }
+        }
+
+        public bool CanExpandBuildView(object Model)
+        {
+            if (Model as PlatformNode != null)
+            {
+                return (Model as PlatformNode).Children.Count > 0;
+            }
+
+            if (Model as ITargetDevice != null)
+            {
+                return (Model as ITargetDevice).Build != null;
+            }
+
+            return false;
+        }
+
+        public IEnumerable BuildViewChildrenGetter(object Model)
+        {
+            if (Model as PlatformNode != null)
+            {
+                return new ArrayList((Model as PlatformNode).Children);
+            }
+
+            if (Model as Device != null && (Model as Device).Build != null)
+            {
+                ArrayList Array = new ArrayList();
+                Array.Add((Model as Device).Build);
+                return Array;
+            }
+
+            return null;
+        }
+
         public void BuildViewRightClickMenuEventHandler(object sender, EventArgs e)
         {
             var MachineNode = BuildView.SelectedItem.RowObject as BuildMachineNode;
@@ -191,7 +359,7 @@ namespace DeploymentTool
 
         public void DeviceViewRightClickMenuEventHandler(object sender, EventArgs e)
         {
-            if (ServerView.SelectedItem == null)
+            if (DeviceView.SelectedItem == null)
             {
                 return;
             }
@@ -200,26 +368,46 @@ namespace DeploymentTool
 
             try
             {
-                var SelectedDevice = ServerView.SelectedItem.RowObject as Device;
+                var SelectedDevice = DeviceView.SelectedItem.RowObject as ITargetDevice;
 
-                var DeploySession = DeploySessions.Find(x => x.Device.Equals(SelectedDevice));
+                if (SelectedDevice == null)
+                {
+                    return;
+                }
 
                 string SelectedMenu = RightClickMenuItem.Text;
 
                 if (SelectedMenu.Equals("Open Log"))
                 {
                     OpenLogFile(SelectedDevice);
+                    return;
                 }
-                else if(SelectedMenu.Equals("Abort Deployment"))
+
+                var DeploySession = DeploySessions.Find(x => x.Device.Equals(SelectedDevice));
+
+                if (SelectedMenu.Equals("Abort Deployment"))
                 {
                     if (DeploySession != null)
                     {
                         DeploySession.Abort();
                     }
+                    return;
                 }
+
+                if (SelectedMenu.Equals("Start Application"))
+                {
+                    SelectedDevice.StartProcess();
+                }
+                
+                if (SelectedMenu.Equals("Stop Application"))
+                {
+                    SelectedDevice.StopProcess();
+                }
+
+                /*
                 else
                 {
-                    if (SelectedDevice.Status == null || !SelectedDevice.Status.Equals(BuildDeploymentResult.Success.ToString()))
+                    if (SelectedDevice.Build.Status == null || !SelectedDevice.Status.Equals(BuildDeploymentResult.Success.ToString()))
                     {
                         MessageBox.Show(string.Format("Cannot open device information until build has been deployed successfully"), "", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
@@ -230,6 +418,7 @@ namespace DeploymentTool
                     DeviceInfoForm.DeviceConfig = new Device(SelectedDevice.UseDevice, SelectedDevice.Platform, SelectedDevice.Role, SelectedDevice.Name, SelectedDevice.Address, SelectedDevice.Username, SelectedDevice.Password, SelectedDevice.CpuAffinity, SelectedDevice.DeploymentPath, SelectedDevice.CmdLineArguments, SelectedDevice.Build);
                     var Result = DeviceInfoForm.ShowDialog();
                 }
+                */
             }
             catch (Exception Ex)
             {
@@ -237,7 +426,7 @@ namespace DeploymentTool
             }
         }
 
-        private void OpenLogFile(Device SelectedDevice)
+        private void OpenLogFile(ITargetDevice SelectedDevice)
         {
             string LogFile = string.Empty;
 
@@ -252,147 +441,65 @@ namespace DeploymentTool
                 MessageBox.Show(string.Format("Failed to open log file {0}. {1}", LogFile, Ex.Message), "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+        
+        private void OnDeviceViewCellEditingStarting(object sender, CellEditEventArgs e)
+        {
+            try
+            {
+                SelectedDevice = e.RowObject as ITargetDevice;
 
-        private void CreateServerDeviceView()
-		{
-            ContextMenu RightClickMenu = new ContextMenu();
-            RightClickMenu.MenuItems.Add("Open Device", new EventHandler(DeviceViewRightClickMenuEventHandler));
-            RightClickMenu.MenuItems.Add("Open Log", new EventHandler(DeviceViewRightClickMenuEventHandler));
-            RightClickMenu.MenuItems.Add("Abort Deployment", new EventHandler(DeviceViewRightClickMenuEventHandler));
-            
-            ServerView.Columns.Clear();
-			ServerView.OwnerDraw = true;
-            ServerView.ContextMenu = RightClickMenu;
-			ServerView.CellEditActivation = BrightIdeasSoftware.TreeListView.CellEditActivateMode.SingleClickAlways;
-			ServerView.CheckBoxes = true;
-			ServerView.CellEditStarting += new CellEditEventHandler(OnServerDeviceViewCellEditingStarting);
-			ServerView.CheckStatePutter += new CheckStatePutterDelegate(UseServerDeviceAspectPutter);
-			ServerView.CheckStateGetter += new CheckStateGetterDelegate(UseServerDeviceAspectGetter);
+                if (SelectedDevice == null)
+                {
+                    return;
+                }
 
-			var UseDeviceColumn = new BrightIdeasSoftware.OLVColumn("Use Device", "Use Device");
-			UseDeviceColumn.Width = 80;
-			ServerView.Columns.Add(UseDeviceColumn);
+                Func<string, string> GetRole = PlatformName =>
+                {
+                    if (PlatformName == PlatformType.Linux.ToString())
+                    {
+                        return RoleType.Server.ToString();
+                    }
 
-			var ProgressColumn = new BrightIdeasSoftware.OLVColumn("Progress", "Progress");
-			ProgressColumn.Width = 80;
-			ProgressColumn.IsEditable = false;
-			ProgressColumn.Renderer = new BarRenderer(0, 100);
-			ProgressColumn.AspectGetter += new AspectGetterDelegate(ProgressBarUpdateAspectGetter);
-			ServerView.Columns.Add(ProgressColumn);
+                    return RoleType.Client.ToString();
+                };
 
-			var DeploymentColumn = new BrightIdeasSoftware.OLVColumn("Progress %", "Progress %");
-			DeploymentColumn.Width = 80;
-			DeploymentColumn.IsEditable = false;
-			DeploymentColumn.TextAlign = HorizontalAlignment.Center;
-			DeploymentColumn.AspectGetter += new AspectGetterDelegate(ProgressUpdateAspectGetter);
-			ServerView.Columns.Add(DeploymentColumn);
+                foreach (var Platform in DeviceList)
+                {
+                    int index = Platform.Children.FindIndex(x => x == SelectedDevice);
 
-			var StatusColumn = new BrightIdeasSoftware.OLVColumn("Status", "Status");
-			StatusColumn.Width = 80;
-			StatusColumn.IsEditable = false;
-			StatusColumn.AspectGetter = x => (x as Device).Status;
-			ServerView.Columns.Add(StatusColumn);
+                    if (Platform.Children.Count() - index <= 1)
+                    {
+                        Platform.Children.Add(DeviceFactory.CreateTargetDevice(false, Platform.Platform, GetRole(Platform.Platform), string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
 
-			var PlatformColumn = new BrightIdeasSoftware.OLVColumn("Platform", "Platform");
-			PlatformColumn.Width = 70;
-			PlatformColumn.AspectGetter = x => (x as Device).Platform;
-			ServerView.Columns.Add(PlatformColumn);
+                        DeviceView.SetObjects(DeviceList);
+                    }
+                }
 
-			var RoleColumn = new BrightIdeasSoftware.OLVColumn("Role", "Role");
-			RoleColumn.Width = 70;
-			RoleColumn.AspectGetter = x => (x as Device).Role;
-			ServerView.Columns.Add(RoleColumn);
+                if (e.Column.Text.Equals("Role") && SelectedDevice.Platform.Equals(PlatformType.Win64.ToString()))
+                {
+                    var RoleComboBox = new ComboBox { Bounds = e.CellBounds, DropDownStyle = ComboBoxStyle.DropDownList };
+                    RoleComboBox.Validating += new CancelEventHandler(OnServerDeviceViewRoleComboBoxValidating);
+                    RoleComboBox.Items.Add("Server");
+                    RoleComboBox.Items.Add("Client");
+                    RoleComboBox.Text = SelectedDevice.Role;
+                    e.Control = RoleComboBox;
+                }
 
-			var AddressColumn = new BrightIdeasSoftware.OLVColumn("Address", "Address");
-			AddressColumn.Width = 90;
-			AddressColumn.AspectGetter = x => (x as Device).Address;
-			ServerView.Columns.Add(AddressColumn);
+                if (e.Column.Text.Equals("User Name"))
+                {
+                    var UserNameTextBox = new TextBox { Bounds = e.CellBounds };
+                    UserNameTextBox.Text = SelectedDevice.Username;
+                    UserNameTextBox.Validating += new CancelEventHandler(OnServerDeviceViewUserNameTextBoxValidating);
+                    e.Control = UserNameTextBox;
+                }
 
-			var NameColumn = new BrightIdeasSoftware.OLVColumn("Name", "Name");
-			NameColumn.Width = 150;
-			NameColumn.AspectGetter = x => (x as Device).Name;
-			ServerView.Columns.Add(NameColumn);
-
-			var UserNameColumn = new BrightIdeasSoftware.OLVColumn("User Name", "User Name");
-			UserNameColumn.Width = 80;
-			UserNameColumn.AspectGetter = x => (x as Device).Username;
-			ServerView.Columns.Add(UserNameColumn);
-
-			var PasswordColumn = new BrightIdeasSoftware.OLVColumn("Password", "Password");
-			PasswordColumn.Width = 80;
-			PasswordColumn.AspectGetter = x => (x as Device).Password;
-			ServerView.Columns.Add(PasswordColumn);
-
-            var CpuAffinityColumn = new BrightIdeasSoftware.OLVColumn("CPU Affinity", "CPU Affinity");
-            CpuAffinityColumn.Width = 80;
-            CpuAffinityColumn.AspectGetter = x => (x as Device).CpuAffinity;
-            ServerView.Columns.Add(CpuAffinityColumn);
-
-            var TargetPathColumn = new BrightIdeasSoftware.OLVColumn("Deployment Path", "Deployment Path");
-			TargetPathColumn.Width = 200;
-			TargetPathColumn.AspectGetter = x => (x as Device).DeploymentPath;
-			ServerView.Columns.Add(TargetPathColumn);
-
-			var ArgumentColumn = new BrightIdeasSoftware.OLVColumn("Cmd Line Argument", "Cmd Line Argument");
-			ArgumentColumn.Width = 200;
-			ArgumentColumn.AspectGetter = x => (x as Device).CmdLineArguments;
-			ServerView.Columns.Add(ArgumentColumn);
-		}
-
-		private void OnServerDeviceViewCellEditingStarting(object sender, CellEditEventArgs e)
-		{
-			try
-			{
-				SelectedServerDevice = e.RowObject as Device;
-
-				if (SelectedServerDevice == null)
-				{
-					return;
-				}
-
-				int index = ServerDeviceList.FindIndex(x => x == SelectedServerDevice);
-
-				if (ServerDeviceList.Count() - index <= 1)
-				{
-					ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
-                    ServerView.SetObjects(ServerDeviceList);
-				}
-
-				if (e.Column.Text.Equals("Platform"))
-				{
-					var PlatformComboBox = new ComboBox { Bounds = e.CellBounds, DropDownStyle = ComboBoxStyle.DropDownList };
-					PlatformComboBox.Validating += new CancelEventHandler(OnServerDeviceViewPlatformComboBoxValidating);
-					PlatformComboBox.Items.Add("Linux");
-					PlatformComboBox.Items.Add("Win64");
-					PlatformComboBox.Text = SelectedServerDevice.Platform;
-					e.Control = PlatformComboBox;
-				}
-
-				if (e.Column.Text.Equals("Role"))
-				{
-					var RoleComboBox = new ComboBox { Bounds = e.CellBounds, DropDownStyle = ComboBoxStyle.DropDownList };
-					RoleComboBox.Validating += new CancelEventHandler(OnServerDeviceViewRoleComboBoxValidating);
-					RoleComboBox.Items.Add("Server");
-					RoleComboBox.Items.Add("Client");
-					RoleComboBox.Text = SelectedServerDevice.Role;
-					e.Control = RoleComboBox;
-				}
-
-				if (e.Column.Text.Equals("User Name"))
-				{
-					var UserNameTextBox = new TextBox { Bounds = e.CellBounds };
-					UserNameTextBox.Text = SelectedServerDevice.Username;
-					UserNameTextBox.Validating += new CancelEventHandler(OnServerDeviceViewUserNameTextBoxValidating);
-					e.Control = UserNameTextBox;
-				}
-
-				if (e.Column.Text.Equals("Password"))
-				{
-					var PasswordTextBox = new TextBox { Bounds = e.CellBounds };
-					PasswordTextBox.Text = SelectedServerDevice.Password;
-					PasswordTextBox.Validating += new CancelEventHandler(OnServerDeviceViewPasswordTextBoxValidating);
-					e.Control = PasswordTextBox;
-				}
+                if (e.Column.Text.Equals("Password"))
+                {
+                    var PasswordTextBox = new TextBox { Bounds = e.CellBounds };
+                    PasswordTextBox.Text = SelectedDevice.Password;
+                    PasswordTextBox.Validating += new CancelEventHandler(OnServerDeviceViewPasswordTextBoxValidating);
+                    e.Control = PasswordTextBox;
+                }
 
                 if (e.Column.Text.Equals("CPU Affinity"))
                 {
@@ -405,35 +512,35 @@ namespace DeploymentTool
                 }
 
                 if (e.Column.Text.Equals("Deployment Path"))
-				{
-					var DeploymentPathTextBox = new TextBox { Bounds = e.CellBounds };
-					DeploymentPathTextBox.Text = SelectedServerDevice.DeploymentPath;
-					DeploymentPathTextBox.Validating += new CancelEventHandler(OnServerDeviceViewTargetInstallPathTextBoxValidating);
-					e.Control = DeploymentPathTextBox;
-				}
+                {
+                    var DeploymentPathTextBox = new TextBox { Bounds = e.CellBounds };
+                    DeploymentPathTextBox.Text = SelectedDevice.DeploymentPath;
+                    DeploymentPathTextBox.Validating += new CancelEventHandler(OnServerDeviceViewTargetInstallPathTextBoxValidating);
+                    e.Control = DeploymentPathTextBox;
+                }
 
-				if (e.Column.Text.Equals("Cmd Line Argument"))
-				{
-					var CmdLineArgumentTextBox = new TextBox { Bounds = e.CellBounds };
-					CmdLineArgumentTextBox.Text = SelectedServerDevice.CmdLineArguments;
-					CmdLineArgumentTextBox.Validating += new CancelEventHandler(OnServerDeviceViewTargetCmdLineArgumentTextBoxValidating);
-					e.Control = CmdLineArgumentTextBox;
-				}
+                if (e.Column.Text.Equals("Cmd Line Argument"))
+                {
+                    var CmdLineArgumentTextBox = new TextBox { Bounds = e.CellBounds };
+                    CmdLineArgumentTextBox.Text = SelectedDevice.CmdLineArguments;
+                    CmdLineArgumentTextBox.Validating += new CancelEventHandler(OnServerDeviceViewTargetCmdLineArgumentTextBoxValidating);
+                    e.Control = CmdLineArgumentTextBox;
+                }
 
-				ServerView.Refresh();
-			}
-			catch (Exception ex)
-			{
-				Console.WriteLine(string.Format("Debug OnDeviceViewCellEditingStarting Ex: {0}", ex.Message));
-			}
-		}
+                DeviceView.Refresh();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(string.Format("Debug OnDeviceViewCellEditingStarting Ex: {0}", ex.Message));
+            }
+        }
 
         private void OnDeviceViewCpuAffinityNumericUpDownClicked(object sender, EventArgs e)
         {
             NumericUpDown CpuAffinityNumericUpDown = sender as NumericUpDown;
-            if (CpuAffinityNumericUpDown != null && SelectedServerDevice != null)
+            if (CpuAffinityNumericUpDown != null && SelectedDevice != null)
             {
-                CpuAffinityNumericUpDown.Value = SelectedServerDevice.CpuAffinity;
+                CpuAffinityNumericUpDown.Value = SelectedDevice.CpuAffinity;
             }
         }
 
@@ -442,14 +549,30 @@ namespace DeploymentTool
             NumericUpDown CpuAffinityNumericUpDown = sender as NumericUpDown;
             if (CpuAffinityNumericUpDown != null)
             {
-                SelectedServerDevice.CpuAffinity = (int)CpuAffinityNumericUpDown.Value;
-                ServerView.RefreshObject(SelectedServerDevice);
+                SelectedDevice.CpuAffinity = (int)CpuAffinityNumericUpDown.Value;
+                DeviceView.RefreshObject(SelectedDevice);
             }
         }
 
         private CheckState UseServerDeviceAspectPutter(object Object, CheckState Value)
 		{
-			var SelectedDevice = Object as Device;
+            var SelectedPlatform = Object as PlatformNode;
+            if (SelectedPlatform != null)
+            {
+                SelectedPlatform.UsePlatform = (Value == CheckState.Checked);
+
+                foreach (var Device in SelectedPlatform.Children)
+                {
+                    if (Device.Address.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    Device.UseDevice = SelectedPlatform.UsePlatform;
+                }
+            }
+
+            var SelectedDevice = Object as ITargetDevice;
 			if (SelectedDevice != null)
 			{
 				SelectedDevice.UseDevice = (Value == CheckState.Checked);
@@ -460,29 +583,40 @@ namespace DeploymentTool
 
 		private CheckState UseServerDeviceAspectGetter(object Object)
 		{
-			SelectedServerDevice = Object as Device;
+            var SelectedPlatform = Object as PlatformNode;
+            if (SelectedPlatform != null)
+            {
+                return SelectedPlatform.UsePlatform ? CheckState.Checked : CheckState.Unchecked;
+            }
 
-			return (SelectedServerDevice != null && SelectedServerDevice.UseDevice) ? CheckState.Checked : CheckState.Unchecked;
+            SelectedDevice = Object as ITargetDevice;
+
+			return (SelectedDevice != null && SelectedDevice.UseDevice) ? CheckState.Checked : CheckState.Unchecked;
 		}
 
 		private object ProgressBarUpdateAspectGetter(object Object)
 		{
-			return CalculateProgressPercentage(Object as Device);
+            if (Object == null || (Object as BuildNode) == null)
+            {
+                return null;
+            }
+
+            return CalculateProgressPercentage(Object as BuildNode);
 		}
 
 		private object ProgressUpdateAspectGetter(object Object)
 		{
-			return string.Format("{0} %", CalculateProgressPercentage(Object as Device));
+			return string.Format("{0} %", CalculateProgressPercentage(Object as BuildNode));
 		}
 
-		private int CalculateProgressPercentage(Device SelectedDevice)
+		private int CalculateProgressPercentage(BuildNode SelectedBuild)
 		{
-			if (SelectedDevice.ProgressMax == 0 || SelectedDevice.Progress == 0)
+			if (SelectedBuild == null || SelectedBuild.ProgressMax == 0 || SelectedBuild.Progress == 0)
 			{
 				return 0;
 			}
 
-			double Ratio = Convert.ToDouble(SelectedDevice.Progress) / Convert.ToDouble(SelectedDevice.ProgressMax);
+			double Ratio = Convert.ToDouble(SelectedBuild.Progress) / Convert.ToDouble(SelectedBuild.ProgressMax);
 
 			int ProgressPercentage = Convert.ToInt32(Ratio * 100);
 
@@ -494,8 +628,8 @@ namespace DeploymentTool
 			CheckBox UseDeviceCheckBox = sender as CheckBox;
 			if (UseDeviceCheckBox != null)
 			{
-				SelectedServerDevice.UseDevice = UseDeviceCheckBox.Checked;
-				ServerView.RefreshObject(SelectedServerDevice);
+                SelectedDevice.UseDevice = UseDeviceCheckBox.Checked;
+				DeviceView.RefreshObject(SelectedDevice);
 			}
 		}
 
@@ -504,8 +638,8 @@ namespace DeploymentTool
 			ComboBox PlatformComboBox = sender as ComboBox;
 			if (PlatformComboBox != null)
 			{
-				SelectedServerDevice.Platform = PlatformComboBox.Text;
-				ServerView.RefreshObject(SelectedServerDevice);
+                SelectedDevice.Platform = PlatformComboBox.Text;
+                DeviceView.RefreshObject(SelectedDevice);
 			}
 		}
 
@@ -514,8 +648,8 @@ namespace DeploymentTool
 			ComboBox RoleComboBox = sender as ComboBox;
 			if (RoleComboBox != null)
 			{
-				SelectedServerDevice.Role = RoleComboBox.Text;
-				ServerView.RefreshObject(SelectedServerDevice);
+                SelectedDevice.Role = RoleComboBox.Text;
+                DeviceView.RefreshObject(SelectedDevice);
 			}
 		}
 
@@ -524,8 +658,8 @@ namespace DeploymentTool
 			TextBox UserNameTextBox = sender as TextBox;
             if (UserNameTextBox != null)
             {
-				SelectedServerDevice.Username = UserNameTextBox.Text;
-				ServerView.RefreshObject(SelectedServerDevice);
+                SelectedDevice.Username = UserNameTextBox.Text;
+                DeviceView.RefreshObject(SelectedDevice);
 			}
 		}
 
@@ -534,8 +668,8 @@ namespace DeploymentTool
 			TextBox PasswordTextBox = sender as TextBox;
 			if (PasswordTextBox != null)
 			{
-				SelectedServerDevice.Password = PasswordTextBox.Text;
-				ServerView.RefreshObject(SelectedServerDevice);
+                SelectedDevice.Password = PasswordTextBox.Text;
+                DeviceView.RefreshObject(SelectedDevice);
 			}
 		}
 
@@ -544,8 +678,8 @@ namespace DeploymentTool
 			TextBox TargetInstallPathTextBox = sender as TextBox;
 			if (TargetInstallPathTextBox != null)
 			{
-				SelectedServerDevice.DeploymentPath = TargetInstallPathTextBox.Text;
-				ServerView.RefreshObject(SelectedServerDevice);
+                SelectedDevice.DeploymentPath = TargetInstallPathTextBox.Text;
+                DeviceView.RefreshObject(SelectedDevice);
 			}
 		}
 
@@ -554,12 +688,12 @@ namespace DeploymentTool
 			TextBox CmdLineArgumentTextBox = sender as TextBox;
 			if (CmdLineArgumentTextBox != null)
 			{
-				SelectedServerDevice.CmdLineArguments = CmdLineArgumentTextBox.Text;
-				ServerView.RefreshObject(SelectedServerDevice);
+                SelectedDevice.CmdLineArguments = CmdLineArgumentTextBox.Text;
+                DeviceView.RefreshObject(SelectedDevice);
 			}
 		}
 
-		private BuildSolutionNode CreateBuildSolutionNode(List<BuildRecord> Builds, Solution Solution, Role Role)
+		private BuildSolutionNode CreateBuildSolutionNode(List<BuildRecord> Builds, SolutionType Solution, RoleType Role)
 		{
 			var SolutionBuilds = Builds.FindAll(x => x.Solution.Equals(Solution.ToString()));
 			var BuildSolution = new BuildSolutionNode(Solution.ToString());
@@ -577,12 +711,12 @@ namespace DeploymentTool
 			return BuildSolution;
 		}
 
-		private BuildPlatformNode CreatePlatformNode(Platform Platform, Role Role)
+		private BuildPlatformNode CreatePlatformNode(PlatformType Platform, RoleType Role)
 		{
 			var PlatformBuilds = MongoDatabase.GetAvailableBuilds(Platform, Role);
-			var DevBuildNode = CreateBuildSolutionNode(PlatformBuilds, Solution.Development, Role);
-			var TestBuildNode = CreateBuildSolutionNode(PlatformBuilds, Solution.Test, Role);
-			var ShippingBuildNode = CreateBuildSolutionNode(PlatformBuilds, Solution.Shipping, Role);
+			var DevBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Development, Role);
+			var TestBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Test, Role);
+			var ShippingBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Shipping, Role);
 
 			var PlatformNode = new BuildPlatformNode(Platform.ToString());
 
@@ -597,29 +731,118 @@ namespace DeploymentTool
 		{
 			BuildList.Clear();
 			BuildView.ClearObjects();
-            
-            var BuildServerNode = CreateBuildMachineNode();
-            var LocalhostNode = CreateLocalHostNode();
 
-            BuildList.Add(BuildServerNode);
-            BuildList.Add(LocalhostNode);
+            string ProjectConfigFile = GetProjectConfigFile();
+            if (!File.Exists(ProjectConfigFile))
+            {
+                MessageBox.Show(string.Format("Could not find any project config file {0}", ProjectConfigFile), "Missing Project Config File", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var ConfiguredProjects = new List<Project>();
+
+            using (StreamReader Stream = new StreamReader(ProjectConfigFile))
+            {
+                ConfiguredProjects.AddRange(JsonConvert.DeserializeObject<List<Project>>(Stream.ReadToEnd()));
+            }
+
+            foreach (var ConfiguredProject in ConfiguredProjects)
+            {
+                BuildList.Add(CreateProjectNode(ConfiguredProject));
+            }
 
             BuildView.Roots = BuildList;
 			BuildView.Refresh();
         }
 
-        private BuildMachineNode CreateBuildMachineNode()
+        private void LoadDeviceView()
         {
-            BuildMachineNode BuildServerNode = new BuildMachineNode("SEH-DLAN-01");
+            DeviceList.Clear();
+            DeviceView.ClearObjects();
+
+            var LinuxNode = new PlatformNode("Linux");
+            var WindowsNode = new PlatformNode("Win64");
+            var PS4Node = new PlatformNode("PS4");
+            
+            var CurrentDirectory = Directory.GetCurrentDirectory();
+
+            var ServerConfigFile = GetDeviceConfigFile();
+            if (System.IO.File.Exists(ServerConfigFile))
+            {
+                var ConfigPlatformDevices = new List<PlatformConfig>();
+
+                using (StreamReader Stream = new StreamReader(ServerConfigFile))
+                {
+                    ConfigPlatformDevices.AddRange(JsonConvert.DeserializeObject<List<PlatformConfig>>(Stream.ReadToEnd()));
+                }
+
+                foreach (var PlatformDeviceNode in ConfigPlatformDevices)
+                {
+                    foreach (var ConfigDevice in PlatformDeviceNode.Children)
+                    {
+                        var DeviceNode = DeviceFactory.CreateTargetDevice(ConfigDevice.UseDevice, ConfigDevice.Platform, ConfigDevice.Role, ConfigDevice.Name, ConfigDevice.Address, ConfigDevice.Username, ConfigDevice.Password, ConfigDevice.CpuAffinity, ConfigDevice.DeploymentPath, ConfigDevice.CmdLineArguments);
+
+                        if (ConfigDevice.UseDevice)
+                        {
+                            DeviceView.CheckObject(DeviceNode);
+                        }
+
+                        if (ConfigDevice.Platform == PlatformType.Linux.ToString())
+                        {
+                            LinuxNode.Children.Add(DeviceNode);
+                            continue;
+                        }
+
+                        if (ConfigDevice.Platform == PlatformType.Win64.ToString())
+                        {
+                            WindowsNode.Children.Add(DeviceNode);
+                            continue;
+                        }
+
+                        if (ConfigDevice.Platform == PlatformType.PS4.ToString())
+                        {
+                            PS4Node.Children.Add(DeviceNode);
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            LinuxNode.Children.Add(DeviceFactory.CreateTargetDevice(false, PlatformType.Linux.ToString(), RoleType.Server.ToString(), string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
+            DeviceList.Add(LinuxNode);
+
+            WindowsNode.Children.Add(DeviceFactory.CreateTargetDevice(false, PlatformType.Win64.ToString(), string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
+            DeviceList.Add(WindowsNode);
+
+            PS4Node.Children.Add(DeviceFactory.CreateTargetDevice(false, PlatformType.PS4.ToString(), RoleType.Client.ToString(), string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
+            DeviceList.Add(PS4Node);
+
+            DeviceView.Roots = DeviceList;
+            DeviceView.Refresh();
+        }
+
+        private ProjectNode CreateProjectNode(Project ConfigProject)
+        {
+            ProjectNode GameProjectNode = new ProjectNode(ConfigProject.DisplayName);
+
+            GameProjectNode.Children.Add(CreateBuildMachineNode(ConfigProject.BuildMachine));
+            GameProjectNode.Children.Add(CreateLocalHostNode());
+
+            return GameProjectNode;
+        }
+
+        private BuildMachineNode CreateBuildMachineNode(string BuildMachineName)
+        {
+            BuildMachineNode BuildServerNode = new BuildMachineNode(BuildMachineName);
 
             BuildRoleNode ServerNode = new BuildRoleNode("Server");
-            ServerNode.Children.Add(CreatePlatformNode(Platform.Linux, Role.Server));
-            ServerNode.Children.Add(CreatePlatformNode(Platform.Win64, Role.Server));
+            ServerNode.Children.Add(CreatePlatformNode(PlatformType.Linux, RoleType.Server));
+            ServerNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Server));
 
             BuildRoleNode ClientNode = new BuildRoleNode("Client");
-            ClientNode.Children.Add(CreatePlatformNode(Platform.Win64, Role.Client));
-            ClientNode.Children.Add(CreatePlatformNode(Platform.XboxOne, Role.Client));
-            ClientNode.Children.Add(CreatePlatformNode(Platform.PS4, Role.Client));
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Client));
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.XboxOne, RoleType.Client));
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.PS4, RoleType.Client));
 
             BuildServerNode.Children.Add(ServerNode);
             BuildServerNode.Children.Add(ClientNode);
@@ -716,44 +939,6 @@ namespace DeploymentTool
             return LocalHostNode;
         }
 
-        
-
-        private void LoadServerDeviceView()
-		{
-			ServerDeviceList.Clear();
-			ServerView.ClearObjects();
-
-			var CurrentDirectory = Directory.GetCurrentDirectory();
-
-			var ServerConfigFile = GetDeviceConfigFile();
-			if (!System.IO.File.Exists(ServerConfigFile))
-			{
-				return;
-			}
-
-			var ServerDevices = new List<Device>();
-
-			using (StreamReader Stream = new StreamReader(ServerConfigFile))
-			{
-				ServerDevices.AddRange(JsonConvert.DeserializeObject<List<Device>> (Stream.ReadToEnd()));
-			}
-
-			foreach (var ServerDevice in ServerDevices)
-			{
-				var DeviceNode = new Device(ServerDevice.UseDevice, ServerDevice.Platform, ServerDevice.Role, ServerDevice.Name, ServerDevice.Address, ServerDevice.Username, ServerDevice.Password, ServerDevice.CpuAffinity, ServerDevice.DeploymentPath, ServerDevice.CmdLineArguments);
-
-				if (ServerDevice.UseDevice)
-				{
-					ServerView.CheckObject(DeviceNode);
-				}
-
-				ServerDeviceList.Add(DeviceNode);
-			}
-
-			ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
-			ServerView.SetObjects(ServerDeviceList);
-		}
-
 		private void btnDeploy_Click(object sender, EventArgs e)
 		{
 			if (DeploySessions.Count() > 0)
@@ -789,81 +974,149 @@ namespace DeploymentTool
 
 				DeploySessions.Clear();
 
-				foreach (var CheckedObject in ServerView.CheckedObjects)
-				{
-					var SelectedDevice = CheckedObject as Device;
+                List<string> PlatformSelected = new List<string>();
+                
+                foreach (var CheckedObject in DeviceView.CheckedObjects)
+                {
+                    var SelectedPlatform = CheckedObject as PlatformNode;
 
-					SelectedDevice.Progress = 0;
-					SelectedDevice.Status = string.Empty;
-				}
+                    if (SelectedPlatform != null)
+                    {
+                        PlatformSelected.Add(SelectedPlatform.Platform);
 
-				ServerView.SetObjects(ServerDeviceList);
-
-				foreach (var CheckedObject in ServerView.CheckedObjects)
-				{
-					var SelectedDevice = CheckedObject as Device;
-
-					if (SelectedDevice.Role.Equals(Role.Server.ToString()))
-					{
-                        if (SelectedServerBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) == null)
+                        foreach (var Device in SelectedPlatform.Children)
                         {
-                            MessageBox.Show("Build platform and device platform mismatch.", "Deployment Failure", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
-                            continue;
+                            Deploy(Device, SelectedServerBuilds, SelectedClientBuilds);
                         }
+                    }
 
-						Deploy(SelectedDevice, SelectedServerBuilds);
-					}
-					else
-					{
-                        if (SelectedClientBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) == null)
-                        {
-                            MessageBox.Show("Build platform and device platform mismatch.", "Deployment Failure", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    var SelectedDevice = CheckedObject as ITargetDevice;
 
-                            continue;
-                        }
-
-                        Deploy(SelectedDevice, SelectedClientBuilds);
-					}
+                    if (SelectedDevice != null && PlatformSelected.Find(x => x.Equals(SelectedDevice.Platform)) == null)
+                    {
+                        Deploy(SelectedDevice, SelectedServerBuilds, SelectedClientBuilds);
+                    }
 				}
-			}
+            }
 			catch(Exception e)
 			{
 				MessageBox.Show(string.Format("Deploy builds failed. {0}", e.Message), "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
 
+        private void Deploy(ITargetDevice SelectedDevice, List<object> SelectedServerBuilds, List<object> SelectedClientBuilds)
+        {
+            if (SelectedDevice.UseDevice)
+            {
+                if (SelectedDevice.Role.Equals(RoleType.Server.ToString()))
+                {
+                    if (SelectedServerBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) != null)
+                    {
+                        Deploy(SelectedDevice, SelectedServerBuilds);
+                    }
+                }
+                else
+                {
+                    if (SelectedClientBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) != null)
+                    {
+                        Deploy(SelectedDevice, SelectedClientBuilds);
+                    }
+                }
+            }
+        }
+
 		private bool IsValidDeviceConfiguration()
 		{
-			var CheckedDevices = ServerView.GetCheckedObjects().ToArray().ToList();
+			var CheckedDevices = DeviceView.GetCheckedObjects().ToArray().ToList();
 
-			foreach (var CheckedObject in ServerView.CheckedObjects)
+			foreach (var CheckedObject in DeviceView.CheckedObjects)
 			{
 				var SelectedDevice = CheckedObject as Device;
 
-				var DevicesWithSameAddress = CheckedDevices.FindAll(x => (x as Device).Platform.Equals(Platform.Win64.ToString()) && (x as Device).Address.Equals(SelectedDevice.Address) && (x as Device).DeploymentPath.Equals(SelectedDevice.DeploymentPath) && !(x as Device).Role.Equals(SelectedDevice.Role));
-				if (DevicesWithSameAddress.Count() > 0)
-				{
-					MessageBox.Show(string.Format("The Win64 server and client with address {0} has the same deployment path, must be different", SelectedDevice.Address), "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (SelectedDevice != null)
+                {
+                    var DevicesWithSameAddress = CheckedDevices.FindAll(x => (x as ITargetDevice) != null && (x as ITargetDevice).Platform.Equals(PlatformType.Win64.ToString()) && (x as ITargetDevice).Address.Equals(SelectedDevice.Address) && (x as ITargetDevice).DeploymentPath.Equals(SelectedDevice.DeploymentPath) && !(x as ITargetDevice).Role.Equals(SelectedDevice.Role));
+                    if (DevicesWithSameAddress.Count() > 0)
+                    {
+                        MessageBox.Show(string.Format("The Win64 server and client with address {0} has the same deployment path, must be different", SelectedDevice.Address), "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
 
-					return false;
-				}
+                        return false;
+                    }
+                }
 			}
 
 			return true;
 		}
 
-		private void Deploy(Device SelectedDevice, List<object> SelectedBuilds)
+		private void Deploy(ITargetDevice SelectedDevice, List<object> SelectedBuilds)
 		{
 			var SelectedBuild = SelectedBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) as BuildNode;
 			if (SelectedBuild != null)
 			{
-                SelectedDevice.Build = SelectedBuild;
-                var Session = new DeploymentSession(this, this, SelectedDevice, ServerView, ServerDeviceList);
+                SelectedDevice.Build = new BuildNode(SelectedBuild.UseBuild, SelectedBuild.Number, SelectedBuild.Timestamp, SelectedBuild.Path, SelectedBuild.Platform, SelectedBuild.Solution, SelectedBuild.Role, SelectedBuild.AutomatedTestStatus);
+                SelectedDevice.ProjectConfig = GetProject(SelectedBuild);
+                var Session = new DeploymentSession(this, this, SelectedDevice, DeviceView, DeviceList, SelectedDevice.ProjectConfig);
 				DeploySessions.Add(Session);
 				var Task = Session.Deploy(SelectedBuild);
 			}
 		}
+
+        private Project GetProject(BuildNode SelectedBuild)
+        {
+            var SelectedProject = GetProjectNode(SelectedBuild);
+            if (SelectedProject == null)
+            {
+                MessageBox.Show(string.Format("Could not find project node for build {0}", SelectedBuild.Number), "Missing Project", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return null;
+            }
+
+            var ConfiguredProjects = new List<Project>();
+
+            using (StreamReader Stream = new StreamReader(GetProjectConfigFile()))
+            {
+                ConfiguredProjects.AddRange(JsonConvert.DeserializeObject<List<Project>>(Stream.ReadToEnd()));
+            }
+
+            foreach (var ConfiguredProject in ConfiguredProjects)
+            {
+                if (ConfiguredProject.DisplayName == SelectedProject.Project)
+                {
+                    return ConfiguredProject;
+                }
+            }
+
+            return null;
+        }
+
+        private ProjectNode GetProjectNode(BuildNode SelectedBuild)
+        {
+            // @HACK - Pretty Please OMFG please shoot me!!!
+
+            foreach (var Project in BuildList)
+            {
+                foreach (var BuildMachine in Project.Children)
+                {
+                    foreach (var BuildRole in BuildMachine.Children)
+                    {
+                        foreach (var Platform in BuildRole.Children)
+                        {
+                            foreach (var BuildSolution in Platform.Children)
+                            {
+                                foreach(var Build in BuildSolution.Children)
+                                {
+                                    if (SelectedBuild == Build)
+                                    {
+                                        return Project;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
 
 		private bool IsValidBuildSelection(List<object> SelectedServerBuilds, List<object> SelectedClientBuilds)
 		{
@@ -874,31 +1127,25 @@ namespace DeploymentTool
 			}
 
 			// Check that we have not selected more than one build for the same platform and role.
-			if (!IsValidBuildSelection(SelectedServerBuilds, Platform.Linux))
+			if (!IsValidBuildSelection(SelectedServerBuilds, PlatformType.Linux))
 			{
 				MessageBox.Show("More than one Linux server build selected.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
 				return false;
 			}
 
-			if (!IsValidBuildSelection(SelectedServerBuilds, Platform.Win64))
+			if (!IsValidBuildSelection(SelectedServerBuilds, PlatformType.Win64))
 			{
 				MessageBox.Show("More than one Win64 server build selected.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
 				return false;
 			}
 
-			if (!IsValidBuildSelection(SelectedClientBuilds, Platform.Win64))
+			if (!IsValidBuildSelection(SelectedClientBuilds, PlatformType.Win64))
 			{
 				MessageBox.Show("More than one Win64 client build selected.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
 				return false;
 			}
 
-			if (SelectedClientBuilds.ToList().FindAll(x => (x as BuildNode).Platform.Equals(Platform.PS4.ToString())).Count > 0)
-			{
-				MessageBox.Show("Client platform PS4 currently not supported", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
-				return false;
-			}
-
-			if (SelectedClientBuilds.ToList().FindAll(x => (x as BuildNode).Platform.Equals(Platform.XboxOne.ToString())).Count > 0)
+			if (SelectedClientBuilds.ToList().FindAll(x => (x as BuildNode).Platform.Equals(PlatformType.XboxOne.ToString())).Count > 0)
 			{
 				MessageBox.Show("Client platform XboxOne currently not supported", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
 				return false;
@@ -932,7 +1179,7 @@ namespace DeploymentTool
 		}
 
 
-		private bool IsValidBuildSelection(List<object> SelectedBuilds, Platform Platform)
+		private bool IsValidBuildSelection(List<object> SelectedBuilds, PlatformType Platform)
 		{
 			var SelectedPlatformBuilds = SelectedBuilds.ToList().FindAll(x => (x as BuildNode).Platform.Equals(Platform.ToString()));
 			if (SelectedPlatformBuilds.Count > 1)
@@ -947,10 +1194,13 @@ namespace DeploymentTool
 		{
 			try
 			{
-				ServerDeviceList.RemoveAll(x => x.Address.Length == 0);
+                foreach (var Platform in DeviceList)
+                {
+                    Platform.Children.RemoveAll(x => x.Address.Length == 0);
+                }
 
 				string ConfigFile = GetDeviceSaveConfigFile();
-				string JsonText = JsonConvert.SerializeObject(ServerDeviceList);
+				string JsonText = JsonConvert.SerializeObject(DeviceList);
 				System.IO.File.WriteAllText(ConfigFile, JsonText);
 			}
 			catch(Exception e)
@@ -958,7 +1208,10 @@ namespace DeploymentTool
 				MessageBox.Show(string.Format("Failed to save devices {0}", e.Message), "Save Devices Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 
-			ServerDeviceList.Add(new Device(false, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
+            foreach (var Platform in DeviceList)
+            {
+                Platform.Children.Add(DeviceFactory.CreateTargetDevice(false, Platform.Platform, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, string.Empty, string.Empty));
+            }
 		}
 
 		private string GetDeviceConfigFile()
@@ -973,6 +1226,12 @@ namespace DeploymentTool
 			string CurrentDirectory = Directory.GetCurrentDirectory();
 			return Path.Combine(CurrentDirectory, "DeviceConfig.json");
 		}
+
+        private string GetProjectConfigFile()
+        {
+            string CurrentDirectory = Directory.GetCurrentDirectory();
+            return Path.Combine(CurrentDirectory, "ProjectConfig.json");
+        }
 
 		private string GetDeviceSaveConfigFile()
 		{
@@ -997,6 +1256,47 @@ namespace DeploymentTool
 		}
 
 	}
+
+    // @Hack to be able to serialize json...
+    public struct PlatformConfig
+    {
+        public string Platform { get; set; }
+        public List<Device> Children { get; set; }
+        public PlatformConfig(string Platform)
+        {
+            this.Platform = Platform;
+            this.Children = new List<Device>();
+        }
+    };
+
+
+    public class PlatformNode
+    {
+        public string Platform { get; set; }
+
+        public bool UsePlatform { get; set; }
+
+        public List<ITargetDevice> Children { get; set; }
+        public PlatformNode(string Platform, bool UsePlatform = false)
+        {
+            this.Platform = Platform;
+            this.UsePlatform = UsePlatform;
+            this.Children = new List<ITargetDevice>();
+        }
+    }
+
+
+    public class ProjectNode
+    {
+        public string Project { get; set; }
+
+        public List<BuildMachineNode> Children { get; set; }
+        public ProjectNode(string Project)
+        {
+            this.Project = Project;
+            this.Children = new List<BuildMachineNode>();
+        }
+    }
 
     public class BuildMachineNode
     {
@@ -1052,8 +1352,11 @@ namespace DeploymentTool
 		public string Solution { get; set; }
 		public string Role { get; set; }
 		public string AutomatedTestStatus { get; set; }
+        public int Progress { get; set; }
+        public int ProgressMax { get; set; }
+        public string Status { get; set; }
 
-		public BuildNode(bool UseBuild, string Number, string Timestamp, string Path, string Platform, string Solution, string Role, string AutomatedTestStatus)
+        public BuildNode(bool UseBuild, string Number, string Timestamp, string Path, string Platform, string Solution, string Role, string AutomatedTestStatus)
 		{
 			this.UseBuild = UseBuild;
 			this.Number = Number;
@@ -1063,55 +1366,11 @@ namespace DeploymentTool
 			this.Solution = Solution;
 			this.Role = Role;
 			this.AutomatedTestStatus = AutomatedTestStatus;
-		}
+            this.Progress = 0;
+            this.ProgressMax = 0;
+            this.Status = string.Empty;
+        }
 	}
 
 
-    public class DirectoryHelper
-    {
-        public static List<string> GetDirectories(string Search)
-        {
-            List<string> FoundDirectories = new List<string>();
-
-            string[] Drives = System.Environment.GetLogicalDrives();
-
-            foreach (string Drive in Drives)
-            {
-                System.IO.DriveInfo CurrentDriveInfo = new System.IO.DriveInfo(Drive);
-
-                if (!CurrentDriveInfo.IsReady)
-                {
-                    continue;
-                }
-
-                WalkDirectoryTree(Search, CurrentDriveInfo.RootDirectory, FoundDirectories);
-            }
-
-            return FoundDirectories;
-        }
-
-        static private void WalkDirectoryTree(string Search, System.IO.DirectoryInfo RootDirectory, List<string> FoundDirectories)
-        {
-            System.IO.DirectoryInfo[]  SubDirs = RootDirectory.GetDirectories();
-
-            foreach (System.IO.DirectoryInfo SubDir in SubDirs)
-            {
-                try
-                {
-                    if (SubDir.Name.Equals(Search))
-                    {
-                        FoundDirectories.Add(SubDir.FullName);
-
-                        continue;
-                    }
-
-                    WalkDirectoryTree(Search, SubDir, FoundDirectories);
-                }
-                catch (UnauthorizedAccessException e)
-                {
-                }
-            }
-        }
-
-    }
 }

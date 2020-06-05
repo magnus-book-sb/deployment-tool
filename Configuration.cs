@@ -4,18 +4,38 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace DeploymentTool
 {
-    public enum Platform { Linux, Win64, XboxOne, PS4 };
+    public enum PlatformType { Linux, Win64, XboxOne, PS4 };
 
-	public enum Role { Server, Client };
+	public enum RoleType { Server, Client };
 
-	public enum Solution { Development, Test, Shipping };
+	public enum SolutionType { Development, Test, Shipping };
 
-    public class Device
+    public class Project
+    {
+        [JsonProperty(PropertyName = "display")]
+        public string DisplayName { get; set; }
+
+        [JsonProperty(PropertyName = "name")]
+        public string Name { get; set; }
+
+        [JsonProperty(PropertyName = "buildmachine")]
+        public string BuildMachine { get; set; }
+
+        public Project(string DisplayName, string Name, string BuildMachine)
+        {
+            this.DisplayName = DisplayName;
+            this.Name = Name;
+            this.BuildMachine = BuildMachine;
+        }
+    }
+
+    public class Device : ITargetDevice
     {
         [JsonProperty(PropertyName = "usedevice")]
         public bool UseDevice { get; set; }
@@ -46,34 +66,52 @@ namespace DeploymentTool
 
         [JsonProperty(PropertyName = "arguments")]
         public string CmdLineArguments { get; set; }
-
-        [JsonIgnore]
-        public string Status { get; set; }
-
-        [JsonIgnore]
-        public int Progress { get; set; }
-
-        [JsonIgnore]
-        public int ProgressMax { get; set; }
-
+        
         [JsonIgnore]
         public BuildNode Build { get; set; }
 
-		public Device(bool UseDevice, string Platform, string Role, string Name, string Address, string Username, string Password, int CpuAffinity, string DeploymentPath, string CmdLineArguments, BuildNode Build = null)
+        [JsonIgnore]
+        public Project ProjectConfig { get; set; }
+
+        public Device(bool UseDevice, string Platform, string Role, string Name, string Address, string Username, string Password, int CpuAffinity, string DeploymentPath, string CmdLineArguments)
 		{
 			this.UseDevice = UseDevice;
-			this.Platform = Platform.Trim();
-			this.Role = Role.Trim();
-			this.Name = Name.Trim();
-			this.Address = Address.Trim();
-			this.Username = Username.Trim();
-			this.Password = Password.Trim();
+			this.Platform = string.IsNullOrEmpty(Platform) ? string.Empty : Platform.Trim();
+			this.Role = string.IsNullOrEmpty(Role) ? string.Empty : Role.Trim();
+			this.Name = string.IsNullOrEmpty(Name) ? string.Empty : Name.Trim();
+			this.Address = string.IsNullOrEmpty(Address) ? string.Empty : Address.Trim();
+			this.Username = string.IsNullOrEmpty(Username) ? string.Empty : Username.Trim();
+			this.Password = string.IsNullOrEmpty(Password) ? string.Empty : Password.Trim();
             this.CpuAffinity = CpuAffinity;
-            this.DeploymentPath = DeploymentPath;
-			this.CmdLineArguments = CmdLineArguments;
-			this.Progress = 0;
-			this.ProgressMax = 0;
-            this.Build = Build;
+            this.DeploymentPath = string.IsNullOrEmpty(DeploymentPath) ? string.Empty : DeploymentPath;
+			this.CmdLineArguments = string.IsNullOrEmpty(CmdLineArguments) ? string.Empty : CmdLineArguments;
+            this.Build = null;
+            this.ProjectConfig = null;
 		}
-	}
+
+        public virtual bool Ping()
+        {
+            throw new NotImplementedException();
+        }
+
+        public virtual bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
+        {
+            throw new NotImplementedException();
+        }
+
+        public virtual bool IsProcessRunning()
+        {
+            throw new NotImplementedException();
+        }
+
+        public virtual bool StartProcess()
+        {
+            throw new NotImplementedException();
+        }
+
+        public virtual bool StopProcess()
+        {
+            throw new NotImplementedException();
+        }
+    }
 }

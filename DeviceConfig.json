@@ -1,25 +1,117 @@
 [
-	{
-
-		"usedevice": true,
-		"platform": "Win64",
-		"role": "Server",
-		"name": "Local Server",
-		"address": "127.0.0.1",
-		"username": "root",
-		"password": "kt50v_hd",
-		"deploymentpath": "PD3-Play-Test-Server",
-		"arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Verbose, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -matchmakinggroup 999977722 -port=9999 -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
-	},
-	{
-		"usedevice": true,
-		"platform": "Win64",
-		"role": "Client",
-		"name": "Local Client",
-		"address": "127.0.0.1",
-		"username": "root",
-		"password": "kt50v_hd",
-		"deploymentpath": "PD3-Play-Test-Client",
-		"arguments": ""
-	}
+  
+  {
+    "Platform": "Linux",
+    "UsePlatform": false,
+    "Children": [
+      {
+        "usedevice": false,
+        "platform": "Linux",
+        "role": "Server",
+        "name": "PD3-DS-MEDIUM-SPEC-02",
+        "address": "192.168.2.56",
+        "username": "jkoperator",
+        "password": "sbz123",
+        "cpuaffinity": 0,
+        "deploymentpath": "/home/jkoperator/StagedBuild",
+        "arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Log, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
+      },
+      {
+        "usedevice": false,
+        "platform": "Linux",
+        "role": "Server",
+        "name": "PD3-DS-MEDIUM-SPEC-03",
+        "address": "192.168.2.55",
+        "username": "jkoperator",
+        "password": "sbz123",
+        "cpuaffinity": 0,
+        "deploymentpath": "/home/jkoperator/StagedBuild",
+        "arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Log, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
+      },
+      {
+        "usedevice": false,
+        "platform": "Linux",
+        "role": "Server",
+        "name": "PD3-DS-MEDIUM-SPEC-04",
+        "address": "192.168.2.54",
+        "username": "jkoperator",
+        "password": "sbz123",
+        "cpuaffinity": 0,
+        "deploymentpath": "/home/jkoperator/StagedBuild",
+        "arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Log, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
+      },
+      {
+        "usedevice": false,
+        "platform": "Linux",
+        "role": "Server",
+        "name": "PD3-DS-MEDIUM-SPEC-05",
+        "address": "192.168.2.53",
+        "username": "jkoperator",
+        "password": "sbz123",
+        "cpuaffinity": 0,
+        "deploymentpath": "/home/jkoperator/StagedBuild",
+        "arguments": " Level_Prototype -NoPacketHandler"
+      },
+      {
+        "usedevice": false,
+        "platform": "Linux",
+        "role": "Server",
+        "name": "136.244.103.1",
+        "address": "136.244.103.1",
+        "username": "build",
+        "password": "sbz123",
+        "cpuaffinity": 0,
+        "deploymentpath": "/home/build/StagedBuild",
+        "arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Log, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
+      }
+    ]
+  },
+  {
+    "Platform": "Win64",
+    "UsePlatform": false,
+    "Children": [
+      {
+        "usedevice": true,
+        "platform": "Win64",
+        "role": "Server",
+        "name": "Local Server",
+        "address": "127.0.0.1",
+        "username": "root",
+        "password": "kt50v_hd",
+        "cpuaffinity": 0,
+        "deploymentpath": "PD3-Play-Test-Server",
+        "arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Log, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
+      },
+      {
+        "usedevice": true,
+        "platform": "Win64",
+        "role": "Client",
+        "name": "Local Client",
+        "address": "127.0.0.1",
+        "username": "root",
+        "password": "kt50v_hd",
+        "cpuaffinity": 0,
+        "deploymentpath": "PD3-Play-Test-Client",
+        "arguments": ""
+      }
+    ]
+  },
+  {
+    "Platform": "PS4",
+    "UsePlatform": false,
+    "Children": [
+      {
+        "usedevice": true,
+        "platform": "PS4",
+        "role": "Client",
+        "name": "Ps4ProJoel",
+        "address": "192.168.1.181",
+        "username": "",
+        "password": "",
+        "cpuaffinity": 0,
+        "deploymentpath": "o:\\192.168.1.181\\data\\shootergame",
+        "arguments": ""
+      }
+    ]
+  }
 ]

@@ -21,19 +21,13 @@ namespace DeploymentTool
 
 	public class FileLogger : ILogger
 	{
-		private Device DeviceConfig;
-
-		private ObjectListView ListView;
-
-		private List<Device> DeviceList;
+		private ITargetDevice DeviceConfig;
 
 		private string LogFile;
 
-		public FileLogger(Device DeviceConfig, ObjectListView ListView, List<Device> DeviceList)
+		public FileLogger(ITargetDevice DeviceConfig)
 		{
 			this.DeviceConfig = DeviceConfig;
-			this.ListView = ListView;
-			this.DeviceList = DeviceList;
 			this.LogFile = CreateLogFile();
 		}
 
@@ -58,7 +52,7 @@ namespace DeploymentTool
 			Write(string.Format("{0}\tWarning    \t\t{1}", GetFormattedDateString(), Text));
 		}
 
-		public static string GetLogFile(Device DeviceConfig)
+		public static string GetLogFile(ITargetDevice DeviceConfig)
 		{
 			string LogPath = GetLogFilePath();
 
@@ -125,7 +119,7 @@ namespace DeploymentTool
 			return LogPath;
 		}
 
-		private static string GetLogFileName(Device DeviceConfig)
+		private static string GetLogFileName(ITargetDevice DeviceConfig)
 		{
 			return string.Format("Deployment-{0}-{1}-{2}.log", DeviceConfig.Address, DeviceConfig.Role, DeviceConfig.Platform);
 		}

@@ -77,7 +77,7 @@ namespace DeploymentTool
 			return Records.ToList();
 		}
 
-		public List<BuildRecord> GetAvailableBuilds(Platform Platform, Solution Solution, Role Role)
+		public List<BuildRecord> GetAvailableBuilds(PlatformType Platform, SolutionType Solution, RoleType Role)
 		{
 			var FilterBuilder = new FilterDefinitionBuilder<BuildRecord>();
 			var Filter = FilterBuilder.Eq("Platform", Platform.ToString()) &
@@ -91,7 +91,7 @@ namespace DeploymentTool
 			return AvailableBuilds;
 		}
 
-		public List<BuildRecord> GetAvailableBuilds(Platform Platform, Role Role)
+		public List<BuildRecord> GetAvailableBuilds(PlatformType Platform, RoleType Role)
 		{
 			var FilterBuilder = new FilterDefinitionBuilder<BuildRecord>();
 			var Filter = FilterBuilder.Eq("Platform", Platform.ToString()) &

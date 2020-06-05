@@ -277,27 +277,24 @@ namespace DeploymentTool
 		#endregion
 	}
 
-	public class TargetDeviceWin64 : ITargetDevice
+	public class TargetDeviceWin64 : Device
 	{
 		private ILogger Logger;		
 		private IDeploymentCallback Callback;
-		private BuildNode Build;
 		private CancellationToken Token;
-		public Device DeviceConfig { get; }
 
-		public TargetDeviceWin64(Device DeviceConfig, BuildNode Build, ILogger Logger)
-		{
-            this.Build = Build;
-            this.Logger = Logger;
-			this.DeviceConfig = DeviceConfig;
-		}
-
-        public bool Ping()
+        public TargetDeviceWin64(bool UseDevice, string Platform, string Role, string Name, string Address, string Username, string Password, int CpuAffinity, string DeploymentPath, string CmdLineArguments)
+            : base (UseDevice, Platform, Role, Name, Address, Username, Password, CpuAffinity, DeploymentPath, CmdLineArguments)
         {
-            return NetworkHelper.PingDevice(DeviceConfig.Address, Logger);
+            this.Logger = new FileLogger(this);
         }
 
-        public bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
+        public override bool Ping()
+        {
+            return NetworkHelper.PingDevice(Address, Logger);
+        }
+
+        public override bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
 		{
 			this.Callback = Callback;
 			this.Token = Token;
@@ -320,12 +317,12 @@ namespace DeploymentTool
 				}
 
                 // Only start downloaded servers automatically
-                if (Build.Role.Equals(Role.Server.ToString()) && !StartProcess())
+                if (Build.Role.Equals(RoleType.Server.ToString()) && !StartProcess())
                 {
                     return CheckCancelationRequestAndReport();
                 }
 
-				Logger.Info(string.Format("Build {0} successfully deployed to Win64 machine {1}", Build.Number, DeviceConfig.Address));
+				Logger.Info(string.Format("Build {0} successfully deployed to Win64 machine {1}", Build.Number, Address));
 
 				Callback.OnBuildDeployed(this, Build);
 
@@ -333,7 +330,7 @@ namespace DeploymentTool
 			}
 			catch(Exception e)
 			{
-				Logger.Error(string.Format("Failed to deploy Win64 build {0} to device {1}. {2}", Build.Number, DeviceConfig.Address, e.Message));
+				Logger.Error(string.Format("Failed to deploy Win64 build {0} to device {1}. {2}", Build.Number, Address, e.Message));
 			}
 
 			return CheckCancelationRequestAndReport();
@@ -343,7 +340,7 @@ namespace DeploymentTool
 		{
 			if (Token.IsCancellationRequested)
 			{
-				Logger.Warning(string.Format("User aborted deployment of build {0} on Win64 machine {1}", Build.Number, DeviceConfig.Address));
+				Logger.Warning(string.Format("User aborted deployment of build {0} on Win64 machine {1}", Build.Number, Address));
 
 				Callback.OnBuildDeployedAborted(this, Build);
 
@@ -364,7 +361,7 @@ namespace DeploymentTool
 
 			var DeploymentPath = GetDeploymentPath();
 
-			NetworkHelper.ConnectToShare(DeploymentPath.FullName, DeviceConfig.Username, DeviceConfig.Password);
+			NetworkHelper.ConnectToShare(DeploymentPath.FullName, Username, Password);
 
 			bool InstallResult = InstallBuild(DeploymentPath);
 
@@ -380,8 +377,8 @@ namespace DeploymentTool
 				return false;
 			}
 
-			DeviceConfig.Progress++;
-			DeviceConfig.Status = "Installing Build";
+			Build.Progress++;
+			Build.Status = "Installing Build";
 
 			foreach (var DeploymentDirectory in DeploymentPath.GetDirectories())
 			{
@@ -405,15 +402,14 @@ namespace DeploymentTool
 				return false;
 			}
 
-			DeviceConfig.Progress++;
+			Build.Progress++;
 
 			return true;
 		}
 
-
 		private DirectoryInfo GetDeploymentPath()
 		{
-			string FullDeploymentPath = string.Format(@"\\{0}\{1}", DeviceConfig.Address, DeviceConfig.DeploymentPath);
+			string FullDeploymentPath = string.Format(@"\\{0}\{1}", Address, DeploymentPath);
 
 			return new DirectoryInfo(FullDeploymentPath);
 		}
@@ -458,7 +454,7 @@ namespace DeploymentTool
 				// Copy each file into the new directory.
 				foreach (FileInfo SourceFile in Source.GetFiles())
 				{
-					Logger.Info(string.Format(@"Copying file to {0}{1}\{2}", DeviceConfig.Address, Target.FullName, SourceFile.Name));
+					Logger.Info(string.Format(@"Copying file to {0}{1}\{2}", Address, Target.FullName, SourceFile.Name));
 					SourceFile.CopyTo(Path.Combine(Target.FullName, SourceFile.Name), true);
 
 					if (Token.IsCancellationRequested)
@@ -506,10 +502,10 @@ namespace DeploymentTool
 			return GameProjectName;
 		}
 
-		public bool StartProcess()
+		public override bool StartProcess()
 		{
-			DeviceConfig.Progress++;
-			DeviceConfig.Status = "Starting Process";
+			Build.Progress++;
+			Build.Status = "Starting Process";
 
 			var ExecutablePath = GetExecutablePath(Build.Solution);
 
@@ -539,7 +535,7 @@ namespace DeploymentTool
 
 				using (var MngmntClass = new ManagementClass(ManagementScope, new ManagementPath("Win32_Process"), new ObjectGetOptions()))
 				{
-					MngmntClass.InvokeMethod("Create", new object[] { string.Format("{0} {1}", ExecutablePath, DeviceConfig.CmdLineArguments) } );
+					MngmntClass.InvokeMethod("Create", new object[] { string.Format("{0} {1}", ExecutablePath, CmdLineArguments) } );
 
 					var Query = new SelectQuery(string.Format("select * from Win32_process where name = '{0}'", GetProcessName(Build.Solution)));
 
@@ -566,13 +562,13 @@ namespace DeploymentTool
 					}
 				}
                 
-                DeviceConfig.Progress++;
+                Build.Progress++;
 
                 return true;
 			}
 			catch(Exception e)
 			{
-				Logger.Error(string.Format("Failed to start Windows process '{0}' on device '{1}'. {2}", ExecutablePath.FullName, DeviceConfig.Address, e.Message));
+				Logger.Error(string.Format("Failed to start Windows process '{0}' on device '{1}'. {2}", ExecutablePath.FullName, Address, e.Message));
 			}
 
 			return false;
@@ -580,27 +576,27 @@ namespace DeploymentTool
 
 		private bool ResetProgress()
 		{
-			Logger.Info(string.Format("Start deploying build {0} to device {1}", Build.Number, DeviceConfig.Address));
+			Logger.Info(string.Format("Start deploying build {0} to device {1}", Build.Number, Address));
 
-			int ProgressStopProcess  = Build.Role.Equals(Role.Server.ToString()) ? 2 : 0;
-            int ProgressStartProcess = Build.Role.Equals(Role.Server.ToString()) ? 2 : 0;
+			int ProgressStopProcess  = Build.Role.Equals(RoleType.Server.ToString()) ? 2 : 0;
+            int ProgressStartProcess = Build.Role.Equals(RoleType.Server.ToString()) ? 2 : 0;
             int ProgressInstallBuild = 2;
 
-			DeviceConfig.Progress = 0;
-			DeviceConfig.Status = "";
-			DeviceConfig.ProgressMax = Directory.GetFiles(Build.Path, "*", SearchOption.AllDirectories).Length + ProgressStopProcess + ProgressStartProcess + ProgressInstallBuild;
+			Build.Progress = 0;
+			Build.Status = "";
+			Build.ProgressMax = Directory.GetFiles(Build.Path, "*", SearchOption.AllDirectories).Length + ProgressStopProcess + ProgressStartProcess + ProgressInstallBuild;
 
             return Ping();
 		}
 
 		private bool StopProcesses()
 		{
-			if (Build.Role.Equals(Role.Server.ToString()))
+			if (Build.Role.Equals(RoleType.Server.ToString()))
 			{
-                DeviceConfig.Status = "Stopping Processes";
-                DeviceConfig.Progress++;
+                Build.Status = "Stopping Processes";
+                Build.Progress++;
 
-                Logger.Info(string.Format("Stopping any running Win64 server process on target device '{0}'", DeviceConfig.Address));
+                Logger.Info(string.Format("Stopping any running Win64 server process on target device '{0}'", Address));
 
 				var ManagementScope = CreateManagementScope();
 
@@ -610,31 +606,31 @@ namespace DeploymentTool
 				}
 
 				// Stop any running windows server.
-				var ExecutablePathDevelopmentBuild = GetProcessName(Solution.Development.ToString());
+				var ExecutablePathDevelopmentBuild = GetProcessName(SolutionType.Development.ToString());
 				if (IsProcessRunning(ExecutablePathDevelopmentBuild, ManagementScope) && !StopProcess(ExecutablePathDevelopmentBuild, ManagementScope))
 				{
 					return false;
 				}
 
-				var ExecutablePathTestBuild = GetProcessName(Solution.Test.ToString());
+				var ExecutablePathTestBuild = GetProcessName(SolutionType.Test.ToString());
 				if (IsProcessRunning(ExecutablePathTestBuild, ManagementScope) && !StopProcess(ExecutablePathTestBuild, ManagementScope))
 				{
 					return false;
 				}
 
-				var ExecutablePathShippingBuild = GetProcessName(Solution.Shipping.ToString());
+				var ExecutablePathShippingBuild = GetProcessName(SolutionType.Shipping.ToString());
 				if (IsProcessRunning(ExecutablePathShippingBuild, ManagementScope) && !StopProcess(ExecutablePathShippingBuild, ManagementScope))
 				{
 					return false;
 				}
 
-                DeviceConfig.Progress++;
+                Build.Progress++;
             }
 
 			return true;
 		}
 
-        public bool StopProcess()
+        public override bool StopProcess()
         {
             var ManagementScope = CreateManagementScope();
 
@@ -658,7 +654,7 @@ namespace DeploymentTool
 				{
 					foreach (ManagementObject Process in Searcher.Get())
 					{
-						Logger.Info(string.Format("Found process '{0}' with id {1} running on target device '{2}'. The process will be terminated", ProcessName, Process["ProcessID"], DeviceConfig.Address));
+						Logger.Info(string.Format("Found process '{0}' with id {1} running on target device '{2}'. The process will be terminated", ProcessName, Process["ProcessID"], Address));
 
 						Process.InvokeMethod("Terminate", null);
 					}
@@ -679,13 +675,13 @@ namespace DeploymentTool
 			}
 			catch (Exception e)
 			{
-				Logger.Error(string.Format("Failed to terminate windows process '{0}' on device '{1}'. {2}", ProcessName, DeviceConfig.Address, e.Message));
+				Logger.Error(string.Format("Failed to terminate windows process '{0}' on device '{1}'. {2}", ProcessName, Address, e.Message));
 			}
 
 			return false;
 		}
 
-        public bool IsProcessRunning()
+        public override bool IsProcessRunning()
         {
             var ManagementScope = CreateManagementScope();
 
@@ -721,9 +717,9 @@ namespace DeploymentTool
 			{
 				ManagementScope Scope = null;
 
-				if (NetworkHelper.IsLocalAddress(DeviceConfig.Address))
+				if (NetworkHelper.IsLocalAddress(Address))
 				{
-					Logger.Info(string.Format("Creating management scope to local host '{0}'", DeviceConfig.Address));
+					Logger.Info(string.Format("Creating management scope to local host '{0}'", Address));
 
 					var Path = new ManagementPath();
 					Path.Server = "";
@@ -732,12 +728,12 @@ namespace DeploymentTool
 				}
 				else
 				{
-					Logger.Info(string.Format("Creating management scope to remote machine '{0}'", DeviceConfig.Address));
+					Logger.Info(string.Format("Creating management scope to remote machine '{0}'", Address));
 
 					var Connection = new ConnectionOptions();
-					Connection.Username = DeviceConfig.Username;
-					Connection.Password = DeviceConfig.Password;
-					Scope = new ManagementScope(string.Format(@"\\{0}\root\cimv2", DeviceConfig.Address), Connection);
+					Connection.Username = Username;
+					Connection.Password = Password;
+					Scope = new ManagementScope(string.Format(@"\\{0}\root\cimv2", Address), Connection);
 				}
 
 				Scope.Connect();
@@ -746,7 +742,7 @@ namespace DeploymentTool
 			}
 			catch (Exception e)
 			{
-				Logger.Error(string.Format("Failed to create Windows management scope for device '{0}'. {1}", DeviceConfig.Address, e.Message));
+				Logger.Error(string.Format("Failed to create Windows management scope for device '{0}'. {1}", Address, e.Message));
 			}
 
 			return null;
@@ -754,14 +750,14 @@ namespace DeploymentTool
 
 		private string GetProcessName(string BuildSolution)
 		{
-			if (Build.Role.Equals(Role.Server.ToString()))
+			if (Build.Role.Equals(RoleType.Server.ToString()))
 			{
-				if (BuildSolution.Equals(Solution.Development.ToString()))
+				if (BuildSolution.Equals(SolutionType.Development.ToString()))
 				{
 					return "ShooterGameServer.exe";
 				}
 
-				if (BuildSolution.Equals(Solution.Test.ToString()))
+				if (BuildSolution.Equals(SolutionType.Test.ToString()))
 				{
 					return "ShooterGameServer-Win64-Test.exe";
 				}
@@ -769,12 +765,12 @@ namespace DeploymentTool
 				return "ShooterGameServer-Win64-Shipping.exe";
 			}
 
-			if (BuildSolution.Equals(Solution.Development.ToString()) || BuildSolution.Equals("Unknown"))
+			if (BuildSolution.Equals(SolutionType.Development.ToString()) || BuildSolution.Equals("Unknown"))
 			{
 				return "ShooterGame.exe";
 			}
 
-			if (BuildSolution.Equals(Solution.Test.ToString()))
+			if (BuildSolution.Equals(SolutionType.Test.ToString()))
 			{
 				return "ShooterGame-Win64-Test.exe";
 			}

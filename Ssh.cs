@@ -25,7 +25,7 @@ namespace DeploymentTool
 
                 try
                 {
-                    using (var Client = new SshClient(Device.DeviceConfig.Address, Device.DeviceConfig.Username, Device.DeviceConfig.Password))
+                    using (var Client = new SshClient(Device.Address, Device.Username, Device.Password))
                     {
                         Client.Connect();
 
@@ -57,7 +57,7 @@ namespace DeploymentTool
                 }
                 catch (Exception e)
                 {
-                    Logger.Warning(string.Format("Failed to run command '{0}' at device '{1}' retry count {2}. Ex: {3}. {4}. {5}. {6}", Argument, Device.DeviceConfig.Address, RetryCount, e.Message, ReturnValue, LogInfo, LogError));
+                    Logger.Warning(string.Format("Failed to run command '{0}' at device '{1}' retry count {2}. Ex: {3}. {4}. {5}. {6}", Argument, Device.Address, RetryCount, e.Message, ReturnValue, LogInfo, LogError));
                 }
 
                 Thread.Sleep(500);
@@ -75,7 +75,7 @@ namespace DeploymentTool
         {
             try
             {
-                using (var Client = new SshClient(Device.DeviceConfig.Address, Device.DeviceConfig.Username, Device.DeviceConfig.Password))
+                using (var Client = new SshClient(Device.Address, Device.Username, Device.Password))
                 {
                     Client.Connect();
 

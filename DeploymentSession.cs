@@ -1,4 +1,5 @@
 using BrightIdeasSoftware;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,25 +23,42 @@ namespace DeploymentTool
 	public interface ITargetDevice
 	{
         bool Ping();
-		Device DeviceConfig { get; }
+		//Device DeviceConfig { get; }
 		bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token);
         bool IsProcessRunning();
         bool StartProcess();
         bool StopProcess();
+        bool UseDevice { get; set; }
+        string Platform { get; set; }
+        string Role { get; set; }
+        string Name { get; set; }
+        string Address { get; set; }
+        string Username { get; set; }
+        string Password { get; set; }
+        int CpuAffinity { get; set; }
+        string DeploymentPath { get; set; }
+        string CmdLineArguments { get; set; }
+        BuildNode Build { get; set; }
+        Project ProjectConfig { get; set; }
     }
 
     public class DeviceFactory
     {
-        public static ITargetDevice CreateTargetDevice(Device DeviceConfig, BuildNode Build, ILogger Logger)
+        public static ITargetDevice CreateTargetDevice(bool UseDevice, string Platform, string Role, string Name, string Address, string Username, string Password, int CpuAffinity, string DeploymentPath, string CmdLineArguments)
         {
-            if (DeviceConfig.Platform.Equals("Linux"))
+            if (Platform.Equals(PlatformType.Linux.ToString()))
             {
-                return new TargetDeviceLinux(DeviceConfig, Build, Logger); 
+                return new TargetDeviceLinux(UseDevice, Platform, Role, Name, Address, Username, Password, CpuAffinity, DeploymentPath, CmdLineArguments);
             }
 
-            if (DeviceConfig.Platform.Equals("Win64"))
+            if (Platform.Equals(PlatformType.Win64.ToString()))
             {
-                return new TargetDeviceWin64(DeviceConfig, Build, Logger);
+                return new TargetDeviceWin64(UseDevice, Platform, Role, Name, Address, Username, Password, CpuAffinity, DeploymentPath, CmdLineArguments);
+            }
+
+            if (Platform.Equals(PlatformType.PS4.ToString()))
+            {
+                return new TargetDevicePS4(UseDevice, Platform, Role, Name, Address, Username, Password, CpuAffinity, DeploymentPath, CmdLineArguments);
             }
 
             return null;
@@ -55,41 +73,37 @@ namespace DeploymentTool
 
 		private ObjectListView ListView;
 
-		private List<Device> DeviceList;
+		private List<PlatformNode> DeviceList;
 
-		private Task<bool> DeploymentTask;
+        private Project ProjectConfig;
+
+        private Task<bool> DeploymentTask;
 
 		private CancellationTokenSource CancellationTaskTokenSource;
 
-		public Device Device { get; private set; }
+		public ITargetDevice Device { get; private set; }
 
         public BuildNode Build { get; private set; }
 
         public ITargetDevice TargetDevice { get; private set; }
 
-        public DeploymentSession(Form MainForm, IDeploymentCallback Callback, Device Device, ObjectListView ListView, List<Device> DeviceList)
+        public DeploymentSession(Form MainForm, IDeploymentCallback Callback, ITargetDevice Device, ObjectListView ListView, List<PlatformNode> DeviceList, Project ProjectConfig)
 		{
 			this.MainForm = MainForm;
 			this.Callback = Callback;
 			this.Device = Device;
 			this.ListView = ListView;
 			this.DeviceList = DeviceList;
-		}
+            this.ProjectConfig = ProjectConfig;
+        }
 
 		public async Task<bool> Deploy(BuildNode Build)
 		{
             this.Build = Build;
-			this.TargetDevice = DeviceFactory.CreateTargetDevice(Device, Build, new FileLogger(Device, ListView, DeviceList));;
-
-			if (TargetDevice == null)
-			{
-				MessageBox.Show(string.Format("Target platform {0} is currently not supported", Device.Platform), "Invalid Platform", MessageBoxButtons.OK, MessageBoxIcon.Error);
-				return false;
-			}
-
+			
 			CancellationTaskTokenSource = new CancellationTokenSource();
 
-			DeploymentTask = Task.Run(() => TargetDevice.DeployBuild(Callback, CancellationTaskTokenSource.Token), CancellationTaskTokenSource.Token);
+			DeploymentTask = Task.Run(() => Device.DeployBuild(Callback, CancellationTaskTokenSource.Token), CancellationTaskTokenSource.Token);
 
 			await DeploymentTask;
 
@@ -107,10 +121,6 @@ namespace DeploymentTool
 				MessageBox.Show(string.Format("Failed to cancel deployment for device {0}. {1}", Device.Address, e.Message), "Abort Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
-
-		
 	}
-
-	
 
 }
