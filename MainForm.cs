@@ -127,20 +127,20 @@ namespace DeploymentTool
                 BuildView.ChildrenGetter = x => (x as ProjectNode != null) ? new ArrayList((x as ProjectNode).Children) : ((x as BuildMachineNode != null) ? new ArrayList((x as BuildMachineNode).Children) : (x as BuildRoleNode != null) ? new ArrayList((x as BuildRoleNode).Children) : ((x as BuildPlatformNode != null) ? new ArrayList((x as BuildPlatformNode).Children) : ((x as BuildSolutionNode != null) ? new ArrayList((x as BuildSolutionNode).Children) : null)));
 
                 var ProjectNameColumn = new BrightIdeasSoftware.OLVColumn("Project", "Project");
-                ProjectNameColumn.Width = 150;
+                ProjectNameColumn.Width = 190;
                 ProjectNameColumn.IsEditable = false;
                 ProjectNameColumn.ImageGetter += new ImageGetterDelegate(ImageGetter);
                 ProjectNameColumn.AspectGetter = x => (x as ProjectNode != null ? (x as ProjectNode).Project : ((x as BuildMachineNode != null ? (x as BuildMachineNode).Machine : (x as BuildRoleNode != null ? (x as BuildRoleNode).Role : ((x as BuildPlatformNode != null ? (x as BuildPlatformNode).Platform : ((x as BuildSolutionNode != null ? (x as BuildSolutionNode).Solution : string.Empty))))))));
                 BuildView.Columns.Add(ProjectNameColumn);
 
                 var MachineNameColumn = new BrightIdeasSoftware.OLVColumn("Machine", "Machine");
-                MachineNameColumn.Width = 150;
+                MachineNameColumn.Width = 90;
                 MachineNameColumn.IsEditable = false;
                 MachineNameColumn.AspectGetter = x => ((x as BuildMachineNode != null ? (x as BuildMachineNode).Machine : string.Empty)); // ((x as BuildRoleNode != null ? (x as BuildRoleNode).Role : ((x as BuildPlatformNode != null ? (x as BuildPlatformNode).Platform : ((x as BuildSolutionNode != null ? (x as BuildSolutionNode).Solution : string.Empty)))))));
                 BuildView.Columns.Add(MachineNameColumn);
 
                 var BuildColumn = new BrightIdeasSoftware.OLVColumn("Build", "Build");
-				BuildColumn.Width = 100;
+				BuildColumn.Width = 90;
 				BuildColumn.IsEditable = false;
 				BuildColumn.AspectGetter = x => ((x as BuildNode != null ? (x as BuildNode).Number : string.Empty));
 				BuildView.Columns.Add(BuildColumn);
@@ -152,7 +152,7 @@ namespace DeploymentTool
 				BuildView.Columns.Add(AutomatedTestStatusColumn);
 
 				var TimestampColumn = new BrightIdeasSoftware.OLVColumn("Timestamp", "Timestamp");
-				TimestampColumn.Width = 120;
+				TimestampColumn.Width = 110;
 				TimestampColumn.IsEditable = false;
 				TimestampColumn.AspectGetter = x => (x as BuildNode != null ? (x as BuildNode).Timestamp : string.Empty);
 				BuildView.Columns.Add(TimestampColumn);
@@ -1055,6 +1055,9 @@ namespace DeploymentTool
 			{
                 SelectedDevice.Build = new BuildNode(SelectedBuild.UseBuild, SelectedBuild.Number, SelectedBuild.Timestamp, SelectedBuild.Path, SelectedBuild.Platform, SelectedBuild.Solution, SelectedBuild.Role, SelectedBuild.AutomatedTestStatus);
                 SelectedDevice.ProjectConfig = GetProject(SelectedBuild);
+
+                DeviceView.RefreshObjects(DeviceList);
+
                 var Session = new DeploymentSession(this, this, SelectedDevice, DeviceView, DeviceList, SelectedDevice.ProjectConfig);
 				DeploySessions.Add(Session);
 				var Task = Session.Deploy(SelectedBuild);
@@ -1145,7 +1148,13 @@ namespace DeploymentTool
 				return false;
 			}
 
-			if (SelectedClientBuilds.ToList().FindAll(x => (x as BuildNode).Platform.Equals(PlatformType.XboxOne.ToString())).Count > 0)
+            if (!IsValidBuildSelection(SelectedClientBuilds, PlatformType.PS4))
+            {
+                MessageBox.Show("More than one PS4 build selected.", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+
+            if (SelectedClientBuilds.ToList().FindAll(x => (x as BuildNode).Platform.Equals(PlatformType.XboxOne.ToString())).Count > 0)
 			{
 				MessageBox.Show("Client platform XboxOne currently not supported", "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
 				return false;
