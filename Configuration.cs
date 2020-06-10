@@ -66,7 +66,13 @@ namespace DeploymentTool
 
         [JsonProperty(PropertyName = "arguments")]
         public string CmdLineArguments { get; set; }
-        
+
+        [JsonIgnore]
+        public string Status
+        {
+            get { return Ping() ? "Online" : "Offline"; }
+        }
+
         [JsonIgnore]
         public BuildNode Build { get; set; }
 

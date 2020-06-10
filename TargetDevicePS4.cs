@@ -36,8 +36,6 @@ namespace DeploymentTool
 
                 OrbisCtrlProc = new OrbisCtrl(this, Logger, Callback, Token);
 
-                
-
                 if (!ResetProgress())
                 {
                     return CheckCancelationRequestAndReport();
@@ -81,11 +79,16 @@ namespace DeploymentTool
 
                 Build.Progress++;
 
+                if (!InstallPackage())
+                {
+                    return CheckCancelationRequestAndReport();
+                }
+                /*
                 if (!InstallBuild())
                 {
                     return CheckCancelationRequestAndReport();
                 }
-
+                */
                 Build.Progress++;
 
                 Callback.OnBuildDeployed(this, Build);
@@ -119,6 +122,38 @@ namespace DeploymentTool
             throw new NotImplementedException();
         }
 
+        private ITarget GetTarget(ORTMAPI TM, string TargetString)
+        {
+            ITarget Target = null;
+
+            if (String.IsNullOrEmpty(TargetString) || TargetString.Equals("default", StringComparison.OrdinalIgnoreCase))
+            {
+                // Use default
+                Target = TM.DefaultTarget;
+            }
+            else
+            {
+                // Find target
+                Array Targets = (Array)TM.GetTargetsByName(TargetString);
+                if (Targets.Length == 0)
+                {
+                    Targets = (Array)TM.GetTargetsByHost(TargetString);
+                }
+
+                if (Targets.Length != 0)
+                {
+                    Target = (ITarget)Targets.GetValue(0);
+                }
+
+                if (Target == null)
+                {
+                    Console.WriteLine("No target " + TargetString);
+                }
+            }
+
+            return Target;
+        }
+
         private bool ResetProgress()
         {
             Logger.Info(string.Format("Start deploying build {0} to device {1}", Build.Number, Address));
@@ -128,6 +163,72 @@ namespace DeploymentTool
             Build.ProgressMax = 4;
 
             return Ping();
+        }
+
+        private bool InstallPackage()
+        {
+            try
+            {
+                if (Token.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                Array Targets = TargetManager.GetTargetsByHost(Address);
+                if (Targets == null)
+                {
+                    Logger.Error(string.Format("Failed to install package to PS4 device {0}. Could not get targets by ORBIS", Address));
+                    return false;
+                }
+
+                ITarget Target = (ITarget)Targets.GetValue(0);
+                if (Target == null)
+                {
+                    Logger.Error(string.Format("Failed to install package to PS4 device {0}. Could not get target by ORBIS", Address));
+                    return false;
+                }
+
+                Target.Connect();
+
+                Build.Status = "Installing Build";
+
+                // e.g O:\KitName\Data\Sandbox\Project\Saved
+                string ArtifactPath = Path.Combine(DeploymentPath, ProjectConfig.Name, @"Saved").ToLower();
+
+                // Remove any existing saved directory
+                if (Directory.Exists(ArtifactPath))
+                {
+                    Directory.Delete(ArtifactPath, true);
+                }
+
+                string BuildPath = Path.Combine(Build.Path, "ArchivedBuilds");
+
+                if (!Directory.Exists(BuildPath))
+                {
+                    Logger.Error(string.Format("Failed to install package to PS4 device {0}. Could not find ArchivedBuilds folder in path {1}", Address, Build.Path));
+                    return false;
+                }
+
+                string[] PkgFiles = Directory.GetFiles(BuildPath, "*.pkg", SearchOption.AllDirectories);
+                if (PkgFiles.Length == 0)
+                {
+                    Logger.Error(string.Format("Failed to install package to PS4 device {0}. Could not find .Pkg files in path {1}", Address, BuildPath));
+                    return false;
+                }
+
+                foreach (var PkgFile in PkgFiles)
+                {
+                    Target.InstallPackage(PkgFile, null);
+                }
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                Logger.Error(string.Format("Failed to install package to PS4 device {0}. Error: {1}", Address, e.Message));
+            }
+
+            return false;
         }
 
         private bool InstallBuild()

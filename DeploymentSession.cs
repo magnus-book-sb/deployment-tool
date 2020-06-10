@@ -38,6 +38,7 @@ namespace DeploymentTool
         int CpuAffinity { get; set; }
         string DeploymentPath { get; set; }
         string CmdLineArguments { get; set; }
+        string Status { get; }
         BuildNode Build { get; set; }
         Project ProjectConfig { get; set; }
     }

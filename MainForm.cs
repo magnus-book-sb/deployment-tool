@@ -228,7 +228,7 @@ namespace DeploymentTool
                 var StatusColumn = new BrightIdeasSoftware.OLVColumn("Status", "Status");
                 StatusColumn.Width = 80;
                 StatusColumn.IsEditable = false;
-                StatusColumn.AspectGetter = x => (x as BuildNode != null ? (x as BuildNode).Status : string.Empty);
+                StatusColumn.AspectGetter = x => (x as BuildNode != null ? (x as BuildNode).Status : ((x as Device != null ? (x as Device).Status : string.Empty)));
                 DeviceView.Columns.Add(StatusColumn);
 
                 var ProgressColumn = new BrightIdeasSoftware.OLVColumn("Progress", "Progress");
@@ -484,6 +484,25 @@ namespace DeploymentTool
                     RoleComboBox.Text = SelectedDevice.Role;
                     e.Control = RoleComboBox;
                 }
+                else
+                {
+                    foreach (BrightIdeasSoftware.OLVColumn Column in DeviceView.Columns)
+                    {
+                        if (Column.Name.Equals("Role"))
+                        {
+                            Column.IsEditable = false;
+                        }
+
+                    }
+                }
+
+                if (e.Column.Text.Equals("Name"))
+                {
+                    var NameTextBox = new TextBox { Bounds = e.CellBounds };
+                    NameTextBox.Text = SelectedDevice.Username;
+                    NameTextBox.Validating += new CancelEventHandler(OnServerDeviceViewNameTextBoxValidating);
+                    e.Control = NameTextBox;
+                }
 
                 if (e.Column.Text.Equals("User Name"))
                 {
@@ -653,7 +672,18 @@ namespace DeploymentTool
 			}
 		}
 
-		private void OnServerDeviceViewUserNameTextBoxValidating(object sender, EventArgs e)
+        private void OnServerDeviceViewNameTextBoxValidating(object sender, EventArgs e)
+        {
+            TextBox NameTextBox = sender as TextBox;
+            if (NameTextBox != null)
+            {
+                SelectedDevice.Name = NameTextBox.Text;
+                DeviceView.RefreshObject(SelectedDevice);
+            }
+        }
+
+
+        private void OnServerDeviceViewUserNameTextBoxValidating(object sender, EventArgs e)
 		{
 			TextBox UserNameTextBox = sender as TextBox;
             if (UserNameTextBox != null)
@@ -941,19 +971,19 @@ namespace DeploymentTool
 
 		private void btnDeploy_Click(object sender, EventArgs e)
 		{
-			if (DeploySessions.Count() > 0)
-			{
-				MessageBox.Show("Deployment already in progress", "Deployment", MessageBoxButtons.OK, MessageBoxIcon.Information);
+           if (DeploySessions.Count() > 0)
+           {
+               MessageBox.Show("Deployment already in progress", "Deployment", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-				return;
-			}
+               return;
+           }
 
-			SaveDevices();
+           SaveDevices();
 
-			DeployBuilds();
-		}
+           DeployBuilds();
+        }
 
-		private void DeployBuilds()
+        private void DeployBuilds()
 		{
 			try
 			{
