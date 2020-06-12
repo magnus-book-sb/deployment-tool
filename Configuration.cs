@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -100,7 +101,7 @@ namespace DeploymentTool
             throw new NotImplementedException();
         }
 
-        public virtual bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
+        public virtual bool DeployBuild(BuildNode Build, IDeploymentSession Callback, CancellationToken Token)
         {
             throw new NotImplementedException();
         }
@@ -118,6 +119,29 @@ namespace DeploymentTool
         public virtual bool StopProcess()
         {
             throw new NotImplementedException();
+        }
+    }
+
+    public static class IListHelper
+    {
+        public static List<T> FindAll<T>(IList Source, Func<T, bool> Pred)
+        {
+            List<T> FoundItems = new List<T>();
+
+            foreach (var SourceItem in Source)
+            {
+                if (SourceItem is T)
+                {
+                    T Item = (T)SourceItem;
+
+                    if (Item != null && Pred(Item))
+                    {
+                        FoundItems.Add(Item);
+                    }
+                }
+            }
+
+            return FoundItems;
         }
     }
 }

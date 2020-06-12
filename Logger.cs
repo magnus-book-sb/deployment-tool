@@ -28,7 +28,6 @@ namespace DeploymentTool
 		public FileLogger(ITargetDevice DeviceConfig)
 		{
 			this.DeviceConfig = DeviceConfig;
-			this.LogFile = CreateLogFile();
 		}
 
 		public void Error(string Text)
@@ -89,8 +88,9 @@ namespace DeploymentTool
             {
                 //ListView.SetObjects(DeviceList);
 
-                if (!File.Exists(LogFile))
+                if (string.IsNullOrEmpty(LogFile) || !File.Exists(LogFile))
                 {
+                    LogFile = CreateLogFile();
                     // Create a file to write to.
                     using (StreamWriter FileWriter = File.CreateText(LogFile))
                     {

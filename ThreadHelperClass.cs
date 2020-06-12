@@ -11,8 +11,25 @@ namespace DeploymentTool
 {
 	public class ThreadHelperClass
 	{
-        delegate void UpdateDeviceDeploymentProgressDelegate(Form form, ObjectListView ListView, ITargetDevice Device);
-		public static void UpdateDeviceDeploymentProgress(Form form, ObjectListView listView, ITargetDevice device)
+        delegate void DeployBuildDelegate(Form form, TreeListView ListView, ITargetDevice Device);
+        public static void DeployBuild(Form form, TreeListView listView, ITargetDevice device)
+        {
+            if (form.InvokeRequired)
+            {
+                var d = new DeployBuildDelegate(DeployBuild);
+                form.Invoke(d, new object[] { form, listView, device });
+            }
+            else
+            {
+                listView.SelectedObject = device;
+                listView.Expand(device);
+                listView.RefreshSelectedObjects(); // RefreshObject(device);
+            }
+        }
+
+
+        delegate void UpdateDeviceDeploymentProgressDelegate(Form form, TreeListView ListView, ITargetDevice Device);
+		public static void UpdateDeviceDeploymentProgress(Form form, TreeListView listView, ITargetDevice device)
 		{
 			if (form.InvokeRequired)
 			{
@@ -21,15 +38,15 @@ namespace DeploymentTool
 			}
 			else
 			{
-				
-				listView.SelectedObject = device;
+                //listView.SelectedObject = device;
 				device.Build.Progress++;
 				listView.RefreshObject(device);
-			}
+                listView.Expand(device);
+            }
 		}
 
-		delegate void SetDeviceDeploymentResultDelegate(Form form, ObjectListView ListView, ITargetDevice Device, BuildDeploymentResult Result);
-		public static void SetDeviceDeploymentResult(Form form, ObjectListView listView, ITargetDevice device, BuildDeploymentResult result)
+		delegate void SetDeviceDeploymentResultDelegate(Form form, TreeListView ListView, ITargetDevice Device, BuildDeploymentResult Result);
+		public static void SetDeviceDeploymentResult(Form form, TreeListView listView, ITargetDevice device, BuildDeploymentResult result)
 		{
 			if (form.InvokeRequired)
 			{

@@ -13,12 +13,12 @@ namespace DeploymentTool
     {
         private TargetDevicePS4 Device;
         private ILogger Logger;
-        private IDeploymentCallback Callback;
+        private IDeploymentSession Callback;
         private CancellationToken Token;
         private string OrbisCtrlPath;
         private Process OrbisCtrlProcess;
 
-        public OrbisCtrl(TargetDevicePS4 Device, ILogger Logger, IDeploymentCallback Callback, CancellationToken Token)
+        public OrbisCtrl(TargetDevicePS4 Device, ILogger Logger, IDeploymentSession Callback, CancellationToken Token)
         {
             this.Device = Device;
             this.Logger = Logger;

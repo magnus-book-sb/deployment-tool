@@ -280,7 +280,7 @@ namespace DeploymentTool
 	public class TargetDeviceWin64 : Device
 	{
 		private ILogger Logger;		
-		private IDeploymentCallback Callback;
+		private IDeploymentSession Callback;
 		private CancellationToken Token;
 
         public TargetDeviceWin64(bool UseDevice, string Platform, string Role, string Name, string Address, string Username, string Password, int CpuAffinity, string DeploymentPath, string CmdLineArguments)
@@ -294,8 +294,9 @@ namespace DeploymentTool
             return NetworkHelper.PingDevice(Address, Logger);
         }
 
-        public override bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
+        public override bool DeployBuild(BuildNode Build, IDeploymentSession Callback, CancellationToken Token)
 		{
+            this.Build = Build;
 			this.Callback = Callback;
 			this.Token = Token;
 

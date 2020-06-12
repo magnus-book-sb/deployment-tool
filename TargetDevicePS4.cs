@@ -1,4 +1,5 @@
-﻿using ORTMAPILib;
+﻿using BrightIdeasSoftware;
+using ORTMAPILib;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -6,13 +7,121 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace DeploymentTool
 {
+    public class DeploymentSessionPS4 : IDeploymentSession
+    {
+        private MainForm WinForm;
+
+        private TreeListView DeviceView;
+
+        private IDeploymentCallback Callback;
+
+        private Task<bool> DeploymentTask;
+
+        private CancellationTokenSource CancellationTaskTokenSource;
+
+        private Project ProjectConfig;
+
+        private int DeployedDeviceCount;
+
+        public List<ITargetDevice> Devices { get; private set; }
+
+        public DeploymentSessionPS4(IDeploymentCallback Callback, MainForm WinForm, TreeListView DeviceView, List<ITargetDevice> Devices)
+        {
+            this.WinForm = WinForm;
+            this.DeviceView = DeviceView;
+            this.Callback = Callback;
+            this.Devices = Devices;
+            this.DeployedDeviceCount = 0;
+        }
+
+        public void OnFileDeployed(ITargetDevice Device, string SourceFile)
+        {
+            ThreadHelperClass.UpdateDeviceDeploymentProgress(WinForm, DeviceView, Device);
+        }
+
+        public void OnBuildDeployed(ITargetDevice Device, BuildNode Build)
+        {
+            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Success);
+
+            DeployedDeviceCount++;
+
+            if (Devices.Count == DeployedDeviceCount)
+            {
+                Callback.OnDeploymentDone(this);
+            }
+        }
+
+        public void OnBuildDeployedError(ITargetDevice Device, BuildNode Build, string ErrorMessage)
+        {
+            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Failure);
+
+            DeployedDeviceCount++;
+
+            if (Devices.Count == DeployedDeviceCount)
+            {
+                Callback.OnDeploymentDone(this);
+            }
+        }
+
+        public void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build)
+        {
+            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Aborted);
+
+            DeployedDeviceCount++;
+
+            if (Devices.Count == DeployedDeviceCount)
+            {
+                Callback.OnDeploymentDone(this);
+            }
+        }
+
+        public void Abort()
+        {
+            MessageBox.Show("Cancel deployment not supported for PS4 device", "Abort Error", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        public async Task<bool> Deploy(BuildNode InBuild)
+        {
+            DeployedDeviceCount = 0;
+            CancellationTaskTokenSource = new CancellationTokenSource();
+
+            DeploymentTask = Task.Run(() => DeployBuild(InBuild, this, CancellationTaskTokenSource.Token), CancellationTaskTokenSource.Token);
+
+            await DeploymentTask;
+
+            return DeploymentTask.Result;
+        }
+
+        private bool DeployBuild(BuildNode InBuild, IDeploymentSession Callback, CancellationToken Token)
+        {
+            foreach (var Device in Devices)
+            {
+                var Build = new BuildNode(InBuild.UseBuild, InBuild.Number, InBuild.Timestamp, InBuild.Path, InBuild.Platform, InBuild.Solution, InBuild.Role, InBuild.AutomatedTestStatus);
+
+                Device.Build = Build;
+                Build.Status = "Waiting for Device";
+
+                ThreadHelperClass.DeployBuild(WinForm, DeviceView, Device);
+            }
+
+            foreach (var Device in Devices)
+            {
+                Device.ProjectConfig = WinForm.GetProject(Device.Build);
+                Device.DeployBuild(Device.Build, Callback, Token);
+            }
+
+            return true;
+        }
+    }
+
     public class TargetDevicePS4 : Device
     {
         private ILogger Logger;
-        private IDeploymentCallback Callback;
+        private IDeploymentSession Callback;
         private CancellationToken Token;
         private ORTMAPI TargetManager;
         private OrbisCtrl OrbisCtrlProc;
@@ -27,10 +136,11 @@ namespace DeploymentTool
             this.TargetManager.CheckCompatibility((uint)eCompatibleVersion.BuildVersion);
         }
 
-        public override bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
+        public override bool DeployBuild(BuildNode Build, IDeploymentSession Callback, CancellationToken Token)
         {
             try
             {
+                this.Build = Build;
                 this.Callback = Callback;
                 this.Token = Token;
 
@@ -45,7 +155,7 @@ namespace DeploymentTool
 
                 // Add PS4 to Neighborhood.
                 ITarget Target = TargetManager.AddTarget(Address);
-
+                
                 SetMappedDirectory(Target);
 
                 LogDeviceDetails(Target);
@@ -56,7 +166,7 @@ namespace DeploymentTool
                 {
                     Target.PowerOn();
                 }
-
+                
                 if (!OrbisCtrlProc.Execute("pkill"))
                 {
                     return false;
@@ -76,19 +186,14 @@ namespace DeploymentTool
 
                     Logger.Info(string.Format("Waiting for PS4 process to exit on PS4 device {0}", Address));
                 }
-
+                
                 Build.Progress++;
 
                 if (!InstallPackage())
                 {
                     return CheckCancelationRequestAndReport();
                 }
-                /*
-                if (!InstallBuild())
-                {
-                    return CheckCancelationRequestAndReport();
-                }
-                */
+                
                 Build.Progress++;
 
                 Callback.OnBuildDeployed(this, Build);
@@ -160,7 +265,7 @@ namespace DeploymentTool
 
             Build.Progress = 0;
             Build.Status = "";
-            Build.ProgressMax = 4;
+            Build.ProgressMax = 5;
 
             return Ping();
         }
@@ -215,6 +320,8 @@ namespace DeploymentTool
                     Logger.Error(string.Format("Failed to install package to PS4 device {0}. Could not find .Pkg files in path {1}", Address, BuildPath));
                     return false;
                 }
+
+                Callback.OnFileDeployed(this, "");
 
                 foreach (var PkgFile in PkgFiles)
                 {

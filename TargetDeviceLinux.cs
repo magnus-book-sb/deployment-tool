@@ -73,7 +73,7 @@ namespace DeploymentTool
 		private ILogger Logger;
 		private Shell Command;
 		private ConnectionInfo Connection;
-		private IDeploymentCallback Callback;
+		private IDeploymentSession Callback;
 		private CancellationToken Token;
 
         public TargetDeviceLinux(bool UseDevice, string Platform, string Role, string Name, string Address, string Username, string Password, int CpuAffinity, string DeploymentPath, string CmdLineArguments)
@@ -121,8 +121,9 @@ namespace DeploymentTool
             return NetworkHelper.PingDevice(Address, Logger);
         }
 
-        public override bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token)
+        public override bool DeployBuild(BuildNode Build, IDeploymentSession Callback, CancellationToken Token)
 		{
+            this.Build = Build;
 			this.Callback = Callback;
 			this.Token = Token;
 
@@ -488,7 +489,7 @@ namespace DeploymentTool
 			return FullBuildDeploymentPath;
 		}
 
-		private bool UploadDirectory(IDeploymentCallback Callback, SftpClient Sftp, string SourcePath, string DestinationPath, string DirSearchPattern)
+		private bool UploadDirectory(IDeploymentSession Callback, SftpClient Sftp, string SourcePath, string DestinationPath, string DirSearchPattern)
 		{
 			if (Token.IsCancellationRequested)
 			{

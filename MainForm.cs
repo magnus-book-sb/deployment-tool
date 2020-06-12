@@ -29,7 +29,7 @@ namespace DeploymentTool
 
         private ITargetDevice SelectedDevice = null;
 
-        private List<DeploymentSession> DeploySessions = new List<DeploymentSession>();
+        private List<IDeploymentSession> DeploySessions = new List<IDeploymentSession>();
 
         private string LocalStagedBuildPath = string.Empty;
 
@@ -42,6 +42,11 @@ namespace DeploymentTool
             CreateDeviceView();
         }
 
+        public void OnDeploymentDone(IDeploymentSession Session)
+        {
+            DeploySessions.Remove(Session);
+        }
+        /*
         public void OnFileDeployed(ITargetDevice Device, string SourceFile)
         {
             ThreadHelperClass.UpdateDeviceDeploymentProgress(this, DeviceView, Device);
@@ -67,7 +72,7 @@ namespace DeploymentTool
 
             ThreadHelperClass.SetDeviceDeploymentResult(this, DeviceView, Device, BuildDeploymentResult.Aborted);
         }
-
+        */
         private void MainForm_Load(object sender, EventArgs e)
         {
             try
@@ -177,8 +182,8 @@ namespace DeploymentTool
                 //RightClickMenu.MenuItems.Add("Open Device", new EventHandler(DeviceViewRightClickMenuEventHandler));
                 RightClickMenu.MenuItems.Add("Open Log", new EventHandler(DeviceViewRightClickMenuEventHandler));
                 RightClickMenu.MenuItems.Add("Abort Deployment", new EventHandler(DeviceViewRightClickMenuEventHandler));
-
-                if (DeploySessions.Find(x => x.Device.Equals(SelectedDevice)) == null && (DeviceView.SelectedObject as ITargetDevice).Build != null)
+                
+                if (DeploySessions.Find(x => x.Devices.Contains(SelectedDevice)) == null && (DeviceView.SelectedObject as ITargetDevice).Build != null)
                 {
                     RightClickMenu.MenuItems.Add("Start Application", new EventHandler(DeviceViewRightClickMenuEventHandler));
                     RightClickMenu.MenuItems.Add("Stop Application", new EventHandler(DeviceViewRightClickMenuEventHandler));
@@ -206,7 +211,6 @@ namespace DeploymentTool
                 DeviceView.CellRightClick += new EventHandler<CellRightClickEventArgs>(DeviceViewRightClickCellEvent);
                 DeviceView.CellEditActivation = BrightIdeasSoftware.TreeListView.CellEditActivateMode.SingleClickAlways;
                 DeviceView.CheckBoxes = true;
-
                 DeviceView.CellEditStarting += new CellEditEventHandler(OnDeviceViewCellEditingStarting);
                 DeviceView.CanExpandGetter = new TreeListView.CanExpandGetterDelegate(CanExpandBuildView);
                 DeviceView.ChildrenGetter = new TreeListView.ChildrenGetterDelegate(BuildViewChildrenGetter); 
@@ -382,8 +386,8 @@ namespace DeploymentTool
                     OpenLogFile(SelectedDevice);
                     return;
                 }
-
-                var DeploySession = DeploySessions.Find(x => x.Device.Equals(SelectedDevice));
+                
+                var DeploySession = DeploySessions.Find(x => x.Devices.Contains(SelectedDevice));
 
                 if (SelectedMenu.Equals("Abort Deployment"))
                 {
@@ -793,7 +797,7 @@ namespace DeploymentTool
             var LinuxNode = new PlatformNode("Linux");
             var WindowsNode = new PlatformNode("Win64");
             var PS4Node = new PlatformNode("PS4");
-            
+
             var CurrentDirectory = Directory.GetCurrentDirectory();
 
             var ServerConfigFile = GetDeviceConfigFile();
@@ -849,6 +853,21 @@ namespace DeploymentTool
 
             DeviceView.Roots = DeviceList;
             DeviceView.Refresh();
+
+            if (LinuxNode.Children.Exists(x => x.UseDevice))
+            {
+                DeviceView.Expand(LinuxNode);
+            }
+
+            if (WindowsNode.Children.Exists(x => x.UseDevice))
+            {
+                DeviceView.Expand(WindowsNode);
+            }
+
+            if (PS4Node.Children.Exists(x => x.UseDevice))
+            {
+                DeviceView.Expand(PS4Node);
+            }
         }
 
         private ProjectNode CreateProjectNode(Project ConfigProject)
@@ -1004,57 +1023,74 @@ namespace DeploymentTool
 
 				DeploySessions.Clear();
 
-                List<string> PlatformSelected = new List<string>();
-                
+                List<ITargetDevice> PS4 = IListHelper.FindAll<ITargetDevice>(DeviceView.CheckedObjects, x => ((x as ITargetDevice) != null && (x as ITargetDevice).Platform.Equals(PlatformType.PS4.ToString())));
+
+                if (PS4.Count > 0)
+                {
+                    var Builds = SelectedBuilds.ToArray().ToList().FindAll(x => (x as BuildNode != null) ? (x as BuildNode).Platform.Equals(PlatformType.PS4.ToString()) : false);
+
+                    if (Builds.Count > 1)
+                    {
+                        MessageBox.Show("Cannot select more than one PS4 build to deploy", "Invalid Build Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                    else if (Builds.Count == 0)
+                    {
+                        MessageBox.Show("No selected PS4 build to deploy, skipping selected PS4 device(s)", "Invalid Build Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    else
+                    {
+                        var Session = new DeploymentSessionPS4(this, this, DeviceView, PS4);
+
+                        DeploySessions.Add(Session);
+
+                        var Task = Session.Deploy(Builds[0] as BuildNode);
+                    }
+                }
+
                 foreach (var CheckedObject in DeviceView.CheckedObjects)
                 {
-                    var SelectedPlatform = CheckedObject as PlatformNode;
-
-                    if (SelectedPlatform != null)
+                    if (!(CheckedObject is ITargetDevice))
                     {
-                        PlatformSelected.Add(SelectedPlatform.Platform);
-
-                        foreach (var Device in SelectedPlatform.Children)
-                        {
-                            Deploy(Device, SelectedServerBuilds, SelectedClientBuilds);
-                        }
+                        continue;
                     }
 
                     var SelectedDevice = CheckedObject as ITargetDevice;
 
-                    if (SelectedDevice != null && PlatformSelected.Find(x => x.Equals(SelectedDevice.Platform)) == null)
+                    if (SelectedDevice is TargetDevicePS4)
                     {
-                        Deploy(SelectedDevice, SelectedServerBuilds, SelectedClientBuilds);
+                        continue;
                     }
-				}
+
+                    var Builds = SelectedBuilds.ToArray().ToList().FindAll(x => (x as BuildNode != null) ? ((x as BuildNode).Platform.Equals(SelectedDevice.Platform) && (x as BuildNode).Role.Equals(SelectedDevice.Role)) : false);
+
+                    if (Builds.Count > 1)
+                    {
+                        MessageBox.Show(string.Format("Cannot select more than one {0} build to deploy", SelectedDevice.Platform), "Invalid Build Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                    else if (Builds.Count == 0)
+                    {
+                        MessageBox.Show(string.Format("No selected {0} build to deploy, skipping selected {0} device", SelectedDevice.Platform), "Invalid Build Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    else
+                    {
+                        var Devices = new List<ITargetDevice>();
+                        Devices.Add(SelectedDevice);
+
+                        var Session = new DeploymentSession(this, this, DeviceView, Devices);
+
+                        DeploySessions.Add(Session);
+
+                        var Task = Session.Deploy(Builds[0] as BuildNode);
+                    }
+
+                }
             }
 			catch(Exception e)
 			{
 				MessageBox.Show(string.Format("Deploy builds failed. {0}", e.Message), "Invalid Selection", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
-
-        private void Deploy(ITargetDevice SelectedDevice, List<object> SelectedServerBuilds, List<object> SelectedClientBuilds)
-        {
-            if (SelectedDevice.UseDevice)
-            {
-                if (SelectedDevice.Role.Equals(RoleType.Server.ToString()))
-                {
-                    if (SelectedServerBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) != null)
-                    {
-                        Deploy(SelectedDevice, SelectedServerBuilds);
-                    }
-                }
-                else
-                {
-                    if (SelectedClientBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) != null)
-                    {
-                        Deploy(SelectedDevice, SelectedClientBuilds);
-                    }
-                }
-            }
-        }
-
+        
 		private bool IsValidDeviceConfiguration()
 		{
 			var CheckedDevices = DeviceView.GetCheckedObjects().ToArray().ToList();
@@ -1078,23 +1114,7 @@ namespace DeploymentTool
 			return true;
 		}
 
-		private void Deploy(ITargetDevice SelectedDevice, List<object> SelectedBuilds)
-		{
-			var SelectedBuild = SelectedBuilds.Find(x => (x as BuildNode).Platform.Equals(SelectedDevice.Platform)) as BuildNode;
-			if (SelectedBuild != null)
-			{
-                SelectedDevice.Build = new BuildNode(SelectedBuild.UseBuild, SelectedBuild.Number, SelectedBuild.Timestamp, SelectedBuild.Path, SelectedBuild.Platform, SelectedBuild.Solution, SelectedBuild.Role, SelectedBuild.AutomatedTestStatus);
-                SelectedDevice.ProjectConfig = GetProject(SelectedBuild);
-
-                DeviceView.RefreshObjects(DeviceList);
-
-                var Session = new DeploymentSession(this, this, SelectedDevice, DeviceView, DeviceList, SelectedDevice.ProjectConfig);
-				DeploySessions.Add(Session);
-				var Task = Session.Deploy(SelectedBuild);
-			}
-		}
-
-        private Project GetProject(BuildNode SelectedBuild)
+        public Project GetProject(BuildNode SelectedBuild)
         {
             var SelectedProject = GetProjectNode(SelectedBuild);
             if (SelectedProject == null)
@@ -1137,7 +1157,10 @@ namespace DeploymentTool
                             {
                                 foreach(var Build in BuildSolution.Children)
                                 {
-                                    if (SelectedBuild == Build)
+                                    if (SelectedBuild.Platform.Equals(Build.Platform) && 
+                                        SelectedBuild.Number.Equals(Build.Number) && 
+                                        SelectedBuild.Role.Equals(Build.Role) && 
+                                        SelectedBuild.Solution.Equals(Build.Solution))
                                     {
                                         return Project;
                                     }

@@ -12,19 +12,26 @@ namespace DeploymentTool
 {
 	public enum BuildDeploymentResult {  Success, Failure, Aborted };
 
+    public interface IDeploymentSession
+    {
+        Task<bool> Deploy(BuildNode Build);
+        void Abort();
+        List<ITargetDevice> Devices { get; }
+        void OnFileDeployed(ITargetDevice Device, string File);
+        void OnBuildDeployed(ITargetDevice Device, BuildNode Build);
+        void OnBuildDeployedError(ITargetDevice Device, BuildNode Build, string ErrorMessage);
+        void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build);
+    }
+
 	public interface IDeploymentCallback
 	{
-		void OnFileDeployed(ITargetDevice Device, string File);
-		void OnBuildDeployed(ITargetDevice Device, BuildNode Build);
-		void OnBuildDeployedError(ITargetDevice Device, BuildNode Build, string ErrorMessage);
-		void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build);
+        void OnDeploymentDone(IDeploymentSession Session);
 	}
 
 	public interface ITargetDevice
 	{
         bool Ping();
-		//Device DeviceConfig { get; }
-		bool DeployBuild(IDeploymentCallback Callback, CancellationToken Token);
+		bool DeployBuild(BuildNode Build, IDeploymentSession Callback, CancellationToken Token);
         bool IsProcessRunning();
         bool StartProcess();
         bool StopProcess();
@@ -66,15 +73,13 @@ namespace DeploymentTool
         }
     }
 
-	public class DeploymentSession
-	{
-		private Form MainForm;
+	public class DeploymentSession : IDeploymentSession
+    {
+		private MainForm WinForm;
 
-		private IDeploymentCallback Callback;
+        private TreeListView DeviceView;
 
-		private ObjectListView ListView;
-
-		private List<PlatformNode> DeviceList;
+        private IDeploymentCallback Callback;
 
         private Project ProjectConfig;
 
@@ -82,29 +87,29 @@ namespace DeploymentTool
 
 		private CancellationTokenSource CancellationTaskTokenSource;
 
-		public ITargetDevice Device { get; private set; }
+		public List<ITargetDevice> Devices { get; private set; }
 
-        public BuildNode Build { get; private set; }
 
-        public ITargetDevice TargetDevice { get; private set; }
-
-        public DeploymentSession(Form MainForm, IDeploymentCallback Callback, ITargetDevice Device, ObjectListView ListView, List<PlatformNode> DeviceList, Project ProjectConfig)
+        public DeploymentSession(IDeploymentCallback Callback, MainForm WinForm, TreeListView DeviceView, List<ITargetDevice> Devices)
 		{
-			this.MainForm = MainForm;
+			this.WinForm = WinForm;
+            this.DeviceView = DeviceView;
 			this.Callback = Callback;
-			this.Device = Device;
-			this.ListView = ListView;
-			this.DeviceList = DeviceList;
-            this.ProjectConfig = ProjectConfig;
+            this.Devices = Devices;
         }
 
-		public async Task<bool> Deploy(BuildNode Build)
-		{
-            this.Build = Build;
-			
-			CancellationTaskTokenSource = new CancellationTokenSource();
+        public async Task<bool> Deploy(BuildNode InBuild)
+        {
+            CancellationTaskTokenSource = new CancellationTokenSource();
 
-			DeploymentTask = Task.Run(() => Device.DeployBuild(Callback, CancellationTaskTokenSource.Token), CancellationTaskTokenSource.Token);
+            var Build = new BuildNode(InBuild.UseBuild, InBuild.Number, InBuild.Timestamp, InBuild.Path, InBuild.Platform, InBuild.Solution, InBuild.Role, InBuild.AutomatedTestStatus);
+
+            Devices[0].ProjectConfig = WinForm.GetProject(Build);
+            Devices[0].Build = Build;
+
+            ThreadHelperClass.DeployBuild(WinForm, DeviceView, Devices[0]);
+
+            DeploymentTask = Task.Run(() => Devices[0].DeployBuild(Build, this, CancellationTaskTokenSource.Token), CancellationTaskTokenSource.Token);
 
 			await DeploymentTask;
 
@@ -119,9 +124,37 @@ namespace DeploymentTool
 			}
 			catch(Exception e)
 			{
-				MessageBox.Show(string.Format("Failed to cancel deployment for device {0}. {1}", Device.Address, e.Message), "Abort Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				MessageBox.Show(string.Format("Failed to cancel deployment for device {0}. {1}", Devices[0].Address, e.Message), "Abort Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
-	}
+
+        public void OnFileDeployed(ITargetDevice Device, string SourceFile)
+        {
+            ThreadHelperClass.UpdateDeviceDeploymentProgress(WinForm, DeviceView, Device);
+        }
+
+        public void OnBuildDeployed(ITargetDevice Device, BuildNode Build)
+        {
+            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Success);
+
+            Callback.OnDeploymentDone(this);
+        }
+
+        public void OnBuildDeployedError(ITargetDevice Device, BuildNode Build, string ErrorMessage)
+        {
+            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Failure);
+
+            Callback.OnDeploymentDone(this);
+        }
+
+        public void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build)
+        {
+            Build.Progress = 0;
+
+            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Aborted);
+
+            Callback.OnDeploymentDone(this);
+        }
+    }
 
 }
