@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 
 namespace DeploymentTool
 {
+    /*
     class WindowsProcess : IPsExecCallback
     {
         private ILogger Logger;
@@ -71,7 +72,7 @@ namespace DeploymentTool
 
 
     }
-    
+    */
 
 
 	public static class NetworkHelper
