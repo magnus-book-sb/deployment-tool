@@ -23,6 +23,12 @@ namespace DeploymentTool
         void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build);
     }
 
+    public interface IProcessCallback
+    {
+        void OnProcessStarted(uint ProcessID);
+        void OnProcessStopped(uint ProcessID);
+    }
+
 	public interface IDeploymentCallback
 	{
         void OnDeploymentDone(IDeploymentSession Session);

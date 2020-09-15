@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -126,6 +127,8 @@ namespace DeploymentTool
         private ORTMAPI TargetManager;
         private OrbisCtrl OrbisCtrlProc;
         private string MappedDirectory;
+        private uint ProcessID = 0;
+
 
         public TargetDevicePS4(bool UseDevice, string Platform, string Role, string Name, string Address, string Username, string Password, int CpuAffinity, string DeploymentPath, string CmdLineArguments)
             : base(UseDevice, Platform, Role, Name, Address, Username, Password, CpuAffinity, DeploymentPath, CmdLineArguments)
@@ -219,12 +222,99 @@ namespace DeploymentTool
 
         public override bool StartProcess()
         {
-            throw new NotImplementedException();
+            try
+            {
+                string Executable = Path.Combine(DeploymentPath, ProjectConfig.Name, "binaries", "ps4", string.Format("{0}.self", ProjectConfig.Name)).ToLower();
+
+                if (!File.Exists(Executable))
+                {
+                    Logger.Error(string.Format("Failed to launch application on PS4 device '{0}'. No executable found.", Address));
+                    return false;
+                }
+
+                Array Targets = TargetManager.GetTargetsByHost(Address) as Array;
+                if (Targets == null || Targets.Length == 0)
+                {
+                    Logger.Error(string.Format("Failed to launch application on PS4 device '{0}'. Get targets by host failed", Address));
+                    return false;
+                }
+
+                ITarget TargetDevice = Targets.GetValue(0) as ITarget;
+                if (TargetDevice == null)
+                {
+                    Logger.Error(string.Format("Failed to launch application on PS4 device '{0}'. Get target device failed", Address));
+                    return false;
+                }
+
+                if (TargetDevice.PowerStatus != ePowerStatus.POWER_STATUS_ON)
+                {
+                    TargetDevice.PowerOn();
+                }
+
+                TargetDevice.Connect();
+
+                Array Processes = (Array)TargetDevice.ProcessInfoSnapshot;
+
+
+
+                IProcess Process = TargetDevice.LoadProcess(eDevice.DEVICE_RAW, string.Empty, (uint)eLoadOptions.LOAD_OPTIONS_DEFAULT, 0, CmdLineArguments, @"O:\192.168.1.181\NPXX53530"); // DeploymentPath);
+
+                ProcessID = Process.Id;
+
+                if (ProcessID == 0)
+                {
+                    Logger.Error(string.Format("Failed to launch application on PS4 device '{0}'. Process id is 0", Address));
+                    return false;
+                }
+
+                new Task(() => AsyncMonitorProcess(TargetDevice, Process)).Start();
+
+                return true;
+            }
+            catch(Exception e)
+            {
+                Logger.Error(string.Format("Failed to launch application on PS4 device '{0}'. Ex: {1}", Address, e.Message));
+            }
+
+            return false;
         }
+
+        private void AsyncMonitorProcess(ITarget TargetDevice, IProcess Process)
+        {
+            PS4Process ProcessHandler = new PS4Process(TargetDevice, Process, Logger);
+
+            ProcessHandler.WaitForExit();
+        }
+
 
         public override bool StopProcess()
         {
-            throw new NotImplementedException();
+            if (ProcessID == 0)
+            {
+                return true;
+            }
+
+            if (!OrbisCtrlProc.Execute(string.Format("pkill {0}", ProcessID)))
+            {
+                return false;
+            }
+
+            int ExitCode = 0;
+            while (!OrbisCtrlProc.HasExited(out ExitCode))
+            {
+                if (Token.IsCancellationRequested)
+                {
+                    OrbisCtrlProc.Kill();
+
+                    Callback.OnBuildDeployedAborted(this, Build);
+
+                    return false;
+                }
+
+                Logger.Info(string.Format("Waiting for PS4 process to exit on PS4 device {0}", Address));
+            }
+
+            return true;
         }
 
         private ITarget GetTarget(ORTMAPI TM, string TargetString)
@@ -623,6 +713,237 @@ namespace DeploymentTool
                     }
                     break;
             }
+        }
+    }
+
+
+
+    public class PS4Process : IEventConsoleOutput, IEventTarget, IEventDebug
+    {
+        public enum eProcessResult
+        {
+            Success = 0,
+            ErrorGeneric = -100,
+            ErrorProcessKilled,
+            ErrorShutdown,
+            ErrorDisconnected,
+            ErrorForceDisconnected,
+            ErrorLoadExecFail,
+            ErrorLoadExecTimeout,
+
+        }
+
+        private ILogger Logger;
+
+        ManualResetEvent ProcessExitEvent = new ManualResetEvent(false);
+
+        readonly ITarget Target = null;
+
+        uint ProcessId = 0;
+
+        public eProcessResult Result { get; protected set; }
+
+        public string ResultString { get; protected set; }
+
+        public int ExitCode { get; protected set; }
+
+        protected bool bSawFatalExit;
+
+        public PS4Process(ITarget InTarget, IProcess Process, ILogger InLogger)
+        {
+            this.Target = InTarget;
+            this.ProcessId = Process.Id;
+            this.Logger = InLogger;
+            Target.AdviseDebugEvents(this);
+            Target.AdviseTargetEvents(this);
+            Target.AdviseConsoleOutputEvents(this);
+            ExitCode = -1;
+        }
+
+        public void Unregister()
+        {
+            try
+            {
+                Target.UnadviseDebugEvents(this);
+            }
+            catch
+            { }
+
+            try
+            {
+                Target.UnadviseTargetEvents(this);
+            }
+            catch
+            { }
+
+            try
+            {
+                Target.UnadviseConsoleOutputEvents(this);
+            }
+            catch
+            { }
+        }
+
+        public void WaitForExit()
+        {
+            while (!ProcessExitEvent.WaitOne(0, false))
+            {
+                Thread.CurrentThread.Join(50);
+            }
+        }
+
+        public void OnProcessExit(IProcessExitEvent pEvent)
+        {
+            if (ProcessId == pEvent.ProcessId)
+            {
+                ExitCode = (int)pEvent.ExitCode;
+                SetDone(eProcessResult.Success, "Process Exited");
+            }
+        }
+
+        public void OnProcessKill(IProcessKillEvent pEvent)
+        {
+            if (ProcessId == pEvent.ProcessId)
+            {
+                // Differentiate between the user closing the app,
+                // and the app crashing and being killed by the system.
+                if (bSawFatalExit)
+                {
+                    ExitCode = -1;
+                    SetDone(eProcessResult.ErrorProcessKilled, "Process was Killed");
+                }
+                else
+                {
+                    SetDone(eProcessResult.Success, "Process was Killed");
+                    ExitCode = 0;
+                }
+            }
+        }
+
+        public void OnPowerState(IPowerStateEvent pEvent)
+        {
+            if (pEvent.Operation == ePowerOperation.POWEROP_SHUTDOWN)
+            {
+                if (pEvent.Progress == ePowerProgress.POWER_OP_STATUS_COMPLETED)
+                {
+                    SetDone(eProcessResult.ErrorShutdown, "Powerdown Occurred");
+                }
+            }
+        }
+
+        public void OnDisconnect(IDisconnectEvent pEvent)
+        {
+            SetDone(eProcessResult.ErrorDisconnected, "Disconnect Occurred");
+        }
+
+        public void OnForceDisconnected(IForceDisconnectedEvent pEvent)
+        {
+            SetDone(eProcessResult.ErrorForceDisconnected, "Force Disconnect Occurred");
+        }
+
+        public void OnLoadExecFail(ILoadExecFailEvent pEvent)
+        {
+            if (this.ProcessId == pEvent.Process.Id)
+            {
+                SetDone(eProcessResult.ErrorLoadExecFail, "LoadExec Fail");
+            }
+        }
+
+        public void OnLoadExecTimeout(ILoadExecTimeoutEvent pEvent)
+        {
+            if (this.ProcessId == pEvent.Process.Id)
+            {
+                SetDone(eProcessResult.ErrorLoadExecTimeout, "LoadExec Timeout");
+            }
+        }
+
+        protected void SetDone(eProcessResult InResult, string InReason)
+        {
+            Result = InResult;
+            ResultString = InReason;
+            ProcessExitEvent.Set();
+        }
+
+        public void OnCoredumpCompleted(ICoredumpCompletedEvent pEvent)
+        { }
+
+        public void OnCoredumpInProgress(ICoredumpInProgressEvent pEvent)
+        { }
+
+        public void OnDynamicLibraryLoad(IDynamicLibraryLoadEvent pEvent)
+        { }
+        public void OnDynamicLibraryUnload(IDynamicLibraryUnloadEvent pEvent)
+        { }
+        public void OnProcessCreate(IProcessCreateEvent pEvent)
+        { }
+        public void OnProcessLoading(IProcessLoadingEvent pEvent)
+        { }
+        public void OnStopNotification(IStopNotificationEvent pEvent)
+        { }
+        public void OnThreadCreate(IThreadCreateEvent pEvent)
+        { }
+        public void OnThreadExit(IThreadExitEvent pEvent)
+        { }
+
+        public void OnBusy(IBusyEvent pEvent)
+        { }
+        public void OnConnect(IConnectEvent pEvent)
+        { }
+        public void OnConnected(IConnectedEvent pEvent)
+        { }
+        public void OnExpiryTime(IExpiryTimeEvent pEvent)
+        { }
+        public void OnFileServingCaseSensitivityChanged(IFileServingCaseSensitivityChangedEvent pEvent)
+        { }
+        public void OnFileServingRootChanged(IFileServingRootChangedEvent pEvent)
+        { }
+        public void OnForcedPowerOff(IForcedPowerOffEvent pEvent)
+        { }
+        public void OnIdle(IIdleEvent pEvent)
+        { }
+        public void OnMultiPhaseProgress(IMultiPhaseProgressEvent pEvent)
+        { }
+        public void OnMultiPhaseProgressError(IMultiPhaseProgressErrorEvent pEvent)
+        { }
+        public void OnNameUpdate(INameUpdateEvent pEvent)
+        { }
+        public void OnProgress(IProgressEvent pEvent)
+        { }
+        public void OnSettingsChanged(ISettingsChangedEvent pEvent)
+        { }
+        public void OnUpdateError(IUpdateErrorEvent pEvent)
+        { }
+        public void OnUpdateProgress(IUpdateProgressEvent pEvent)
+        { }
+
+
+        public void OnConsoleOutput(IConsoleOutputEvent pEvent)
+        {
+            if (pEvent.Category == eConsoleOutputCategory.PROCESS_OUTPUT)
+            {
+                if (pEvent.ProcessId == ProcessId)
+                {
+                    if (pEvent.Port == eConsoleOutputPort.STREAM_STDIO)
+                    {
+                        Console.Out.Write(pEvent.Text);
+                    }
+                    else if (pEvent.Port == eConsoleOutputPort.STREAM_STDERR)
+                    {
+                        Console.Out.Write("STDERR:" + pEvent.Text);
+                    }
+                }
+            }
+            else if (pEvent.Category == eConsoleOutputCategory.KERNEL_OUTPUT || pEvent.Category == eConsoleOutputCategory.CP_KERNEL_OUTPUT)
+            {
+                if (Regex.IsMatch(pEvent.Text, @"\(SIG.+\)") || pEvent.Text.Contains("abort"))
+                {
+                    bSawFatalExit = true;
+                }
+            }
+        }
+
+        public void OnBufferReady(IBufferReadyEvent pEvent)
+        {
         }
     }
 }
