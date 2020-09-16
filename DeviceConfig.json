@@ -63,6 +63,30 @@
         "cpuaffinity": 0,
         "deploymentpath": "/home/build/StagedBuild",
         "arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Log, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
+      },
+      {
+        "usedevice": false,
+        "platform": "Linux",
+        "role": "Server",
+        "name": "136.244.97.182",
+        "address": "136.244.97.182",
+        "username": "build",
+        "password": "sbz123",
+        "cpuaffinity": 0,
+        "deploymentpath": "/home/build/StagedBuild",
+        "arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Log, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
+      },
+      {
+        "usedevice": false,
+        "platform": "Linux",
+        "role": "Server",
+        "name": "45.76.34.94",
+        "address": "45.76.34.94",
+        "username": "build",
+        "password": "sbz123",
+        "cpuaffinity": 0,
+        "deploymentpath": "/home/build/StagedBuild",
+        "arguments": "Level_Prototype -ExecCmds=\\\"SBZ.Online.DumpOnlineSession 1\\\" -LogCmds=\\\"LogNet Log, LogBeacon Verbose, LogSbzMatchmaking Verbose, LogSBZOnlineSession VeryVerbose, LogOnline Verbose, LogLobbyLocalState Log, LogSbzLobbyRemoteState Log, LogHandshake Log\\\" -stdout -NoPacketHandler -windowed -log -nosteam -unattended -novsync -server"
       }
     ]
   },

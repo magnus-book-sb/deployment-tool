@@ -103,6 +103,14 @@ namespace DeploymentTool
 			this.Callback = Callback;
             this.Devices = Devices;
         }
+        // This constructor is used for command line 
+        public DeploymentSession(IDeploymentCallback Callback, List<ITargetDevice> Devices)
+        {
+            this.WinForm = null;
+            this.DeviceView = null;
+            this.Callback = Callback;
+            this.Devices = Devices;
+        }
 
         public async Task<bool> Deploy(BuildNode InBuild)
         {
@@ -122,6 +130,35 @@ namespace DeploymentTool
 			return DeploymentTask.Result;
 		}
 
+		public async Task<bool> DeployFromCommandLine(BuildNode InBuild, Project ProjectConfig)
+		{
+			CancellationTaskTokenSource = new CancellationTokenSource();
+
+			var Build = new BuildNode(InBuild.UseBuild, InBuild.Number, InBuild.Timestamp, InBuild.Path, InBuild.Platform, InBuild.Solution, InBuild.Role, InBuild.AutomatedTestStatus);
+            var DeployTasks = new List<Task<bool>>();
+            foreach (ITargetDevice Device in Devices)
+            {
+                Device.ProjectConfig = ProjectConfig;
+                Device.Build = Build;
+
+                DeploymentTask = Task.Run(() => Device.DeployBuild(Build, this, CancellationTaskTokenSource.Token), CancellationTaskTokenSource.Token);
+                DeployTasks.Add(DeploymentTask);
+            }
+            
+            // Wait for all tasks
+            Task AllTasks = Task.WhenAll(DeployTasks);
+            await AllTasks;
+
+            // Computer overall task(s) results
+            bool OverallResult = true;
+            foreach(Task<bool> FinishedTask in DeployTasks)
+            {
+                OverallResult = OverallResult && FinishedTask.Result;
+            }
+            
+			return OverallResult;
+		}
+
 		public void Abort()
 		{
 			try
@@ -136,29 +173,37 @@ namespace DeploymentTool
 
         public void OnFileDeployed(ITargetDevice Device, string SourceFile)
         {
-            ThreadHelperClass.UpdateDeviceDeploymentProgress(WinForm, DeviceView, Device);
+            if(WinForm != null && DeviceView != null)
+            {
+                ThreadHelperClass.UpdateDeviceDeploymentProgress(WinForm, DeviceView, Device);
+            }
         }
 
         public void OnBuildDeployed(ITargetDevice Device, BuildNode Build)
         {
-            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Success);
-
+            if (WinForm != null && DeviceView != null)
+            {
+                ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Success);
+            }
             Callback.OnDeploymentDone(this);
         }
 
         public void OnBuildDeployedError(ITargetDevice Device, BuildNode Build, string ErrorMessage)
         {
-            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Failure);
-
+            if (WinForm != null && DeviceView != null)
+            {
+                ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Failure);
+            }
             Callback.OnDeploymentDone(this);
         }
 
         public void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build)
         {
             Build.Progress = 0;
-
-            ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Aborted);
-
+            if (WinForm != null && DeviceView != null)
+            {
+                ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Aborted);
+            }
             Callback.OnDeploymentDone(this);
         }
     }

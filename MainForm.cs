@@ -12,12 +12,356 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.VisualBasic;
 
 namespace DeploymentTool
 {
+    public class ConsoleApp : IDeploymentCallback
+    {
+        private List<ProjectNode> BuildList = new List<ProjectNode>();
+
+        private List<PlatformNode> DeviceList = new List<PlatformNode>();
+
+        private List<IDeploymentSession> DeploySessions = new List<IDeploymentSession>();
+
+        private DeploymentCommon DeployCommon = new DeploymentCommon();
+
+        private Dictionary<string, List<string>> CommandLineArgs = new Dictionary<string, List<string>>();
+
+        private List<string> DevicesNotFound = new List<string>();
+
+        private bool ArgumentsAreOk = true;
+
+        private const string BuildNumberKey = "buildnumber";
+        private const string ConfigKey = "config";
+        private const string PlatformKey = "platform";
+        private const string RoleKey = "role";
+        private const string ProjectKey = "project";
+        private const string DevicesKey = "devices";
+        private const string LongHelpKey = "-help"; // if --help is in the arguments
+        private const string ShortHelpKey = "h"; // if -h is in the arguments
+
+        public ConsoleApp()
+        {
+        }
+        // This is not an instant operation, move it to a separate function to not have to wait if we just want to get the command line help for example
+        public void RetrieveBuildsAndDevices()
+        {
+            InitBuildList();
+            InitDeviceList();
+        }
+        private void InitBuildList()
+        {
+            BuildList.Clear();
+
+            string ProjectConfigFile = DeployCommon.GetProjectConfigFile();
+            if (!File.Exists(ProjectConfigFile))
+            {
+                Console.WriteLine(string.Format("Could not find any project config file {0}", ProjectConfigFile), "Missing Project Config File");
+                return;
+            }
+
+            var ConfiguredProjects = new List<Project>();
+
+            using (StreamReader Stream = new StreamReader(ProjectConfigFile))
+            {
+                ConfiguredProjects.AddRange(JsonConvert.DeserializeObject<List<Project>>(Stream.ReadToEnd()));
+            }
+
+            foreach (var ConfiguredProject in ConfiguredProjects)
+            {
+                BuildList.Add(DeployCommon.CreateProjectNode(ConfiguredProject));
+            }
+        }
+
+        private void InitDeviceList()
+        {
+            DeviceList.Clear();
+
+            var LinuxNode = new PlatformNode("Linux");
+            var WindowsNode = new PlatformNode("Win64");
+            var PS4Node = new PlatformNode("PS4");
+
+            var CurrentDirectory = Directory.GetCurrentDirectory();
+
+            var ServerConfigFile = DeployCommon.GetDeviceConfigFile();
+            if (System.IO.File.Exists(ServerConfigFile))
+            {
+                var ConfigPlatformDevices = new List<PlatformConfig>();
+
+                using (StreamReader Stream = new StreamReader(ServerConfigFile))
+                {
+                    ConfigPlatformDevices.AddRange(JsonConvert.DeserializeObject<List<PlatformConfig>>(Stream.ReadToEnd()));
+                }
+
+                foreach (var PlatformDeviceNode in ConfigPlatformDevices)
+                {
+                    foreach (var ConfigDevice in PlatformDeviceNode.Children)
+                    {
+                        var DeviceNode = DeviceFactory.CreateTargetDevice(ConfigDevice.UseDevice, ConfigDevice.Platform, ConfigDevice.Role, ConfigDevice.Name, ConfigDevice.Address, ConfigDevice.Username, ConfigDevice.Password, ConfigDevice.CpuAffinity, ConfigDevice.DeploymentPath, ConfigDevice.CmdLineArguments);
+
+                        if (ConfigDevice.Platform == PlatformType.Linux.ToString())
+                        {
+                            LinuxNode.Children.Add(DeviceNode);
+                            continue;
+                        }
+
+                        if (ConfigDevice.Platform == PlatformType.Win64.ToString())
+                        {
+                            WindowsNode.Children.Add(DeviceNode);
+                            continue;
+                        }
+
+                        if (ConfigDevice.Platform == PlatformType.PS4.ToString())
+                        {
+                            PS4Node.Children.Add(DeviceNode);
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            DeviceList.Add(LinuxNode);
+
+            DeviceList.Add(WindowsNode);
+
+            DeviceList.Add(PS4Node);
+
+        }
+
+        public void ProcessCommandLineArgs(string[] clArgs)
+        {
+            // add arguments and their value to CommandLineArgs dictionary
+            string LastFoundKey = string.Empty;
+            for(int ItArg = 0, ItArgEnd = clArgs.Length; ItArg < ItArgEnd; ++ItArg)
+            {
+                string Arg = clArgs[ItArg];
+                if(Arg.StartsWith("-"))
+                {
+                    // we want to retrieve arguments starting with "-" as a key and following argument(s), not starting with "-" as its value
+                    LastFoundKey = Arg.Substring(1);
+                    CommandLineArgs.Add(LastFoundKey, new List<string>());
+                }
+                else
+                {
+                    if(LastFoundKey.Length > 0)
+                    {
+                        List<string> Values = CommandLineArgs[LastFoundKey];
+                        Values.Add(Arg);
+                    }
+                }
+            }
+
+            // check if we just have to print usage
+            if(CommandLineArgs.ContainsKey(LongHelpKey) || CommandLineArgs.ContainsKey(ShortHelpKey))
+            {
+                PrintUsageAndExit();
+            }
+
+            // check if needed arguments have a value
+            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(ProjectKey);
+            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(RoleKey);
+            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(PlatformKey);
+            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(ConfigKey);
+            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(BuildNumberKey);
+
+            // set DevicesNotFound using CommandLineArgs[DevicesKey] entries
+            List<string> SearchedDeviceName = CommandLineArgs[DevicesKey];
+            foreach (string UnmatchedDevName in SearchedDeviceName)
+            {
+                DevicesNotFound.Add(UnmatchedDevName);
+            }
+
+            if(DevicesNotFound.Count == 0)
+            {
+                ArgumentsAreOk = false;
+                Console.WriteLine("No device(s) to deploy to have been found !");
+            }
+
+            if(!ArgumentsAreOk)
+            {
+                PrintUsageAndExit();
+            }
+        }
+
+        private void PrintUsage()
+        {
+            Console.WriteLine("");
+            Console.WriteLine("DeploymentTool command line is expecting the following arguments :");
+            Console.WriteLine("-project ProjectName (check ProjectConfig.json to see available project names)");
+            Console.WriteLine("-role RoleName (expected values are Server | Client )");
+            Console.WriteLine("-platform PlatformName (expected values are Linux | Win64 | PS4 )");
+            Console.WriteLine("-config ConfigName (expected values are Development | Test | Shipping )");
+            Console.WriteLine("-buildnumber <JenkinsBuildNumber>-<P4CLNumber> (available builds number will be checked against that number)");
+            Console.WriteLine("-devices deviceName1 [ deviceName2, ... ] (device(s) to deploy to, if there is more than one device separate them with a space)");
+            Console.WriteLine("");
+            Console.WriteLine("Example :");
+            Console.WriteLine("DeploymentTool -project ShooterGame -role Server -platform Linux -config Test -buildnumber 3194-439744 -devices 127.0.0.1 192.0.0.2");
+            Console.WriteLine("");
+        }
+
+        private void PrintUsageAndExit()
+        {
+            PrintUsage();
+            Environment.Exit(0);
+        }
+
+        private void PrintErrorAndExit(string Msg)
+        {
+            Console.WriteLine(string.Format("{0}, exiting !", Msg));
+            Environment.Exit(1); // just something different from 0 so as script expecting 0 for success can behave accordingly
+        }
+
+        // Check against unmatched device(s) list, if a match has been found update unmatched list and return true
+        private bool IsWantedDevice(string DevName)
+        {
+            bool FoundDevice = false;
+            foreach (string WantedName in DevicesNotFound)
+            {
+                if( DevName == WantedName)
+                {
+                    FoundDevice = true;
+                    break;
+                }
+            }
+
+            if(FoundDevice)
+            {
+                DevicesNotFound.Remove(DevName);
+            }
+
+            return FoundDevice;
+        }
+
+        private bool IsNeededArgumentSet(string ArgName)
+        {
+            List<string> ArgValue;
+            if (CommandLineArgs.TryGetValue(ArgName, out ArgValue))
+            {
+                if(ArgValue.Count > 0)
+                {
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine(string.Format("Argument -{0} needs a value !", ArgName));
+                }
+            }
+            else
+            {
+                Console.WriteLine(string.Format("Missing argument -{0}", ArgName));
+            }
+            return false;
+        }
+
+        // This function will exit the process (with 1 if an error happened, or 0 if deploy is successful)
+        public void CheckAndDeploy()
+        {
+            // set ProjectNode and BuildNode with the build to retrieve
+            ProjectNode SelectedBuild = null;
+            BuildNode SelectedBuildNode = null;
+
+            var BNodeVisitor = new BuildNodeVisitor(CommandLineArgs[BuildNumberKey][0]);
+            var BSolutionVisitor = new BuildSolutionNodeVisitor(CommandLineArgs[ConfigKey][0], BNodeVisitor);
+            var BPlatformVisitor = new BuildPlatformNodeVisitor(CommandLineArgs[PlatformKey][0], BSolutionVisitor);
+            var BRoleVisitor = new BuildRoleNodeVisitor(CommandLineArgs[RoleKey][0], BPlatformVisitor);
+            var BMachineVisitor = new BuildMachineNodeVisitor(String.Empty, BRoleVisitor);
+            var BProjectVisitor = new ProjectNodeVisitor(CommandLineArgs[ProjectKey][0], BMachineVisitor);
+            
+            // search for the build we want to deploy
+            foreach (ProjectNode Project in BuildList)
+            {
+                Project.Accept(BProjectVisitor);
+                if(BNodeVisitor.FoundBuilds.Count > 0)
+                {
+                    SelectedBuild = Project;
+                    SelectedBuildNode = BNodeVisitor.FoundBuilds[0];
+                    break;
+                }
+            }
+
+            if (SelectedBuildNode == null)
+            {
+                PrintErrorAndExit(string.Format("Unable to find an available build matching number [{0}]", CommandLineArgs[BuildNumberKey][0]));
+            }
+
+            // retrieve Project matching ConfiguredProjects name
+            Project SelectedProject = null;
+            var ConfiguredProjects = new List<Project>();
+            using (StreamReader Stream = new StreamReader(DeployCommon.GetProjectConfigFile()))
+            {
+                ConfiguredProjects.AddRange(JsonConvert.DeserializeObject<List<Project>>(Stream.ReadToEnd()));
+            }
+
+            foreach (var ConfiguredProject in ConfiguredProjects)
+            {
+                if (ConfiguredProject.DisplayName == SelectedBuild.Project)
+                {
+                    SelectedProject = ConfiguredProject;
+                    break;
+                }
+            }
+
+            if (SelectedProject == null)
+            {
+                PrintErrorAndExit("Unable to retrieve a matching ConfiguredProject from ProjectConfig.json");
+            }
+
+            // search for device(s) we need to deploy the build to
+            List<ITargetDevice> SelectedDevices = new List<ITargetDevice>();
+            foreach (PlatformNode PNode in DeviceList)
+            {
+                foreach(ITargetDevice Device in PNode.Children)
+                {
+                    if(IsWantedDevice(Device.Name))
+                    {
+                        SelectedDevices.Add(Device);
+                    }
+                }
+            }
+            
+            if(SelectedDevices.Count == 0)
+            {
+                PrintErrorAndExit("Unable to found any matching device(s) from DeviceConfig.json");
+            }
+            // print if any devices that have not been found
+            foreach(string NotFoundDev in DevicesNotFound)
+            {
+                Console.WriteLine(string.Format("Device [{0}] have not been found in DeviceConfig.json, ignoring this device !", NotFoundDev));
+            }
+
+            var Session = new DeploymentSession(this, SelectedDevices);
+            DeploySessions.Add(Session);
+
+            try
+            {
+                var DeployTasks = Session.DeployFromCommandLine(SelectedBuildNode, SelectedProject);
+
+                // Wait for all tasks
+                Task AllTasks = Task.WhenAll(DeployTasks);
+                AllTasks.Wait();
+            }
+            catch (Exception e)
+            {
+                PrintErrorAndExit(string.Format("Deploy builds failed. {0}", e.Message));
+            }
+
+            Console.WriteLine(string.Format("Build [{0}] have been successfully deployed to following devices :", CommandLineArgs[BuildNumberKey][0]));
+            foreach(ITargetDevice Device in SelectedDevices)
+            {
+                Console.WriteLine(string.Format("{0}", Device.Name));
+            }
+            Environment.Exit(0); // Exit with successful value once the deploy is done
+        }
+
+        public void OnDeploymentDone(IDeploymentSession Session)
+        {
+            DeploySessions.Remove(Session);
+        }
+    }
 
     public partial class MainForm : Form, IDeploymentCallback
     {
@@ -25,13 +369,11 @@ namespace DeploymentTool
 
         private List<PlatformNode> DeviceList = new List<PlatformNode>();
 
-        private MongoDb MongoDatabase = null;
-
         private ITargetDevice SelectedDevice = null;
 
         private List<IDeploymentSession> DeploySessions = new List<IDeploymentSession>();
 
-        private string LocalStagedBuildPath = string.Empty;
+        private DeploymentCommon DeployCommon = new DeploymentCommon();
 
         public MainForm()
         {
@@ -77,7 +419,7 @@ namespace DeploymentTool
         {
             try
             {
-                this.MongoDatabase = new MongoDb();
+                //this.MongoDatabase = new MongoDb();
 
                 LoadBuildView();
 
@@ -342,17 +684,17 @@ namespace DeploymentTool
             {
                 if (MachineNode.Machine.Equals(System.Environment.MachineName.ToUpper()))
                 {
-                    LocalStagedBuildPath = Interaction.InputBox("Staged Build Path", "Supply Path", LocalStagedBuildPath, -1, -1);
+                    DeployCommon.LocalStagedBuildPath = Interaction.InputBox("Staged Build Path", "Supply Path", DeployCommon.LocalStagedBuildPath, -1, -1);
 
-                    if (string.IsNullOrEmpty(LocalStagedBuildPath))
+                    if (string.IsNullOrEmpty(DeployCommon.LocalStagedBuildPath))
                     {
                         return;
                     }
 
-                    if (!Directory.Exists(LocalStagedBuildPath))
+                    if (!Directory.Exists(DeployCommon.LocalStagedBuildPath))
                     {
-                        MessageBox.Show(string.Format("Supplied path '{0}' not valid", LocalStagedBuildPath), "Invalid Staged Build Path", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        LocalStagedBuildPath = string.Empty;
+                        MessageBox.Show(string.Format("Supplied path '{0}' not valid", DeployCommon.LocalStagedBuildPath), "Invalid Staged Build Path", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        DeployCommon.LocalStagedBuildPath = string.Empty;
                         return;
                     }
                 }
@@ -729,37 +1071,13 @@ namespace DeploymentTool
 
 		private BuildSolutionNode CreateBuildSolutionNode(List<BuildRecord> Builds, SolutionType Solution, RoleType Role)
 		{
-			var SolutionBuilds = Builds.FindAll(x => x.Solution.Equals(Solution.ToString()));
-			var BuildSolution = new BuildSolutionNode(Solution.ToString());
-
-			foreach (var SolutionBuild in SolutionBuilds)
-			{
-				if (!Directory.Exists(SolutionBuild.Path))
-				{
-					continue;
-				}
-
-				BuildSolution.Children.Add(new BuildNode(false, SolutionBuild.BuildNumber, SolutionBuild.Timestamp.ToString(), SolutionBuild.Path, SolutionBuild.Platform, Solution.ToString(), Role.ToString(), SolutionBuild.Status));
-			}
-
-			return BuildSolution;
-		}
+            return DeployCommon.CreateBuildSolutionNode(Builds, Solution, Role);
+        }
 
 		private BuildPlatformNode CreatePlatformNode(PlatformType Platform, RoleType Role)
 		{
-			var PlatformBuilds = MongoDatabase.GetAvailableBuilds(Platform, Role);
-			var DevBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Development, Role);
-			var TestBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Test, Role);
-			var ShippingBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Shipping, Role);
-
-			var PlatformNode = new BuildPlatformNode(Platform.ToString());
-
-			PlatformNode.Children.Add(DevBuildNode);
-			PlatformNode.Children.Add(TestBuildNode);
-			PlatformNode.Children.Add(ShippingBuildNode);
-
-			return PlatformNode;
-		}
+            return DeployCommon.CreatePlatformNode(Platform, Role);
+        }
 
         private void LoadBuildView()
 		{
@@ -872,120 +1190,22 @@ namespace DeploymentTool
 
         private ProjectNode CreateProjectNode(Project ConfigProject)
         {
-            ProjectNode GameProjectNode = new ProjectNode(ConfigProject.DisplayName);
-
-            GameProjectNode.Children.Add(CreateBuildMachineNode(ConfigProject.BuildMachine));
-            GameProjectNode.Children.Add(CreateLocalHostNode());
-
-            return GameProjectNode;
+            return DeployCommon.CreateProjectNode(ConfigProject);
         }
 
         private BuildMachineNode CreateBuildMachineNode(string BuildMachineName)
         {
-            BuildMachineNode BuildServerNode = new BuildMachineNode(BuildMachineName);
-
-            BuildRoleNode ServerNode = new BuildRoleNode("Server");
-            ServerNode.Children.Add(CreatePlatformNode(PlatformType.Linux, RoleType.Server));
-            ServerNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Server));
-
-            BuildRoleNode ClientNode = new BuildRoleNode("Client");
-            ClientNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Client));
-            ClientNode.Children.Add(CreatePlatformNode(PlatformType.XboxOne, RoleType.Client));
-            ClientNode.Children.Add(CreatePlatformNode(PlatformType.PS4, RoleType.Client));
-
-            BuildServerNode.Children.Add(ServerNode);
-            BuildServerNode.Children.Add(ClientNode);
-
-            return BuildServerNode;
+            return DeployCommon.CreateBuildMachineNode(BuildMachineName);
         }
 
         private BuildPlatformNode CreatePlatformNode(string Platform, string Role, string[] BuildDirectories)
         {
-            var PlatformNode = new BuildPlatformNode(Platform);
-
-            var DevelopmentBuild = new BuildSolutionNode("Development");
-            var TestBuild = new BuildSolutionNode("Test");
-            var ShippingBuild = new BuildSolutionNode("Shipping");
-            var UnknownBuild = new BuildSolutionNode("Unknown");
-
-            foreach (var  BuildDirectory in BuildDirectories)
-            {
-                DirectoryInfo BuildDirectoryInfo = new DirectoryInfo(BuildDirectory);
-                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("binaries") || BuildDirectoryInfo.Parent.ToString().ToLower().Equals("build"))
-                {
-                    continue;
-                }
-
-                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("development"))
-                {
-                    DevelopmentBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Development", Role, ""));
-                    continue;
-                }
-
-                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("test"))
-                {
-                    TestBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Test", Role, ""));
-                    continue;
-                }
-
-                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("shipping"))
-                {
-                    ShippingBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Shipping", Role, ""));
-                    continue;
-                }
-
-                UnknownBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Unknown", Role, ""));
-            }
-
-            PlatformNode.Children.Add(DevelopmentBuild);
-            PlatformNode.Children.Add(TestBuild);
-            PlatformNode.Children.Add(ShippingBuild);
-            PlatformNode.Children.Add(UnknownBuild);
-
-            return PlatformNode;
+            return DeployCommon.CreatePlatformNode(Platform, Role, BuildDirectories);
         }
 
         private BuildMachineNode CreateLocalHostNode()
         {
-            BuildMachineNode LocalHostNode = new BuildMachineNode(System.Environment.MachineName);
-
-            BuildRoleNode ServerNode = new BuildRoleNode("Server");
-            BuildRoleNode ClientNode = new BuildRoleNode("Client");
-
-            var CurrentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
-
-            if (string.IsNullOrEmpty(LocalStagedBuildPath) && CurrentDirectory.Parent != null && CurrentDirectory.Parent.Parent != null && CurrentDirectory.Parent.Parent.Name.Equals("UE4"))
-            {
-                LocalStagedBuildPath = Path.Combine(CurrentDirectory.Parent.Parent.FullName, "ShooterGame", "Saved", "StagedBuilds");
-
-                if (!Directory.Exists(LocalStagedBuildPath))
-                {
-                    LocalStagedBuildPath = string.Empty;
-                }
-            }
-
-            if (!string.IsNullOrEmpty(LocalStagedBuildPath))
-            {
-                var LinuxServerBuilds = Directory.GetDirectories(LocalStagedBuildPath, "LinuxServer", SearchOption.AllDirectories);
-                ServerNode.Children.Add(CreatePlatformNode("Linux", "Server", LinuxServerBuilds));
-
-                var WindowServerBuilds = Directory.GetDirectories(LocalStagedBuildPath, "WindowsServer", SearchOption.AllDirectories);
-                ServerNode.Children.Add(CreatePlatformNode("Win64", "Server", WindowServerBuilds));
-
-                var XboxOneBuilds = Directory.GetDirectories(LocalStagedBuildPath, "XboxOne", SearchOption.AllDirectories);
-                ClientNode.Children.Add(CreatePlatformNode("XboxOne", "Client", XboxOneBuilds));
-
-                var PS4Builds = Directory.GetDirectories(LocalStagedBuildPath, "PS4", SearchOption.AllDirectories);
-                ClientNode.Children.Add(CreatePlatformNode("PS4", "Client", PS4Builds));
-
-                var WindowClientBuilds = Directory.GetDirectories(LocalStagedBuildPath, "WindowsNoEditor", SearchOption.AllDirectories);
-                ClientNode.Children.Add(CreatePlatformNode("Win64", "Client", WindowClientBuilds));
-            }
-
-            LocalHostNode.Children.Add(ServerNode);
-            LocalHostNode.Children.Add(ClientNode);
-
-            return LocalHostNode;
+            return DeployCommon.CreateLocalHostNode();
         }
 
 		private void btnDeploy_Click(object sender, EventArgs e)
@@ -1278,29 +1498,18 @@ namespace DeploymentTool
 
 		private string GetDeviceConfigFile()
 		{
-			string DeviceConfigFile = GetDeviceSaveConfigFile();
-
-			if (File.Exists(DeviceConfigFile))
-			{
-				return DeviceConfigFile;
-			}
-
-			string CurrentDirectory = Directory.GetCurrentDirectory();
-			return Path.Combine(CurrentDirectory, "DeviceConfig.json");
-		}
+            return DeployCommon.GetDeviceConfigFile();
+        }
 
         private string GetProjectConfigFile()
         {
-            string CurrentDirectory = Directory.GetCurrentDirectory();
-            return Path.Combine(CurrentDirectory, "ProjectConfig.json");
+            return DeployCommon.GetProjectConfigFile();
         }
 
 		private string GetDeviceSaveConfigFile()
 		{
-			string CurrentDirectory = Directory.GetCurrentDirectory();
-			string DeviceConfigFileName = string.Format("{0}-DeviceConfig.json", System.Environment.MachineName);
-			return Path.Combine(CurrentDirectory, DeviceConfigFileName);
-		}
+            return DeployCommon.GetDeviceSaveConfigFile();
+        }
 
 		private void btnAbort_Click(object sender, EventArgs e)
 		{
@@ -1318,6 +1527,206 @@ namespace DeploymentTool
 		}
 
 	}
+
+    public class DeploymentCommon
+    {
+        private MongoDb MongoDatabase = null;
+
+        public string LocalStagedBuildPath { get; set; }
+
+        public DeploymentCommon()
+        {
+            this.LocalStagedBuildPath = string.Empty;
+            this.MongoDatabase = new MongoDb();
+        }
+
+        public BuildMachineNode CreateBuildMachineNode(string BuildMachineName)
+        {
+            BuildMachineNode BuildServerNode = new BuildMachineNode(BuildMachineName);
+
+            BuildRoleNode ServerNode = new BuildRoleNode("Server");
+            int LimitToFirstBuildsCount = 250; // we know that more recent builds only are kept on the server, so check the LimitToFirstBuildsCount first build when creating a PlatformNode
+			ServerNode.Children.Add(CreatePlatformNode(PlatformType.Linux, RoleType.Server, LimitToFirstBuildsCount));
+            ServerNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Server, LimitToFirstBuildsCount));
+
+            BuildRoleNode ClientNode = new BuildRoleNode("Client");
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Client, LimitToFirstBuildsCount));
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.XboxOne, RoleType.Client, LimitToFirstBuildsCount));
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.PS4, RoleType.Client, LimitToFirstBuildsCount));
+
+            BuildServerNode.Children.Add(ServerNode);
+            BuildServerNode.Children.Add(ClientNode);
+
+            return BuildServerNode;
+        }
+ 
+        public BuildSolutionNode CreateBuildSolutionNode(List<BuildRecord> Builds, SolutionType Solution, RoleType Role)
+        {
+            var SolutionBuilds = Builds.FindAll(x => x.Solution.Equals(Solution.ToString()));
+            var BuildSolution = new BuildSolutionNode(Solution.ToString());
+
+            foreach (var SolutionBuild in SolutionBuilds)
+            {
+                if (!Directory.Exists(SolutionBuild.Path))
+                {
+                    continue;
+                }
+
+                BuildSolution.Children.Add(new BuildNode(false, SolutionBuild.BuildNumber, SolutionBuild.Timestamp.ToString(), SolutionBuild.Path, SolutionBuild.Platform, Solution.ToString(), Role.ToString(), SolutionBuild.Status));
+            }
+
+            return BuildSolution;
+        }
+        public BuildMachineNode CreateLocalHostNode()
+        {
+            BuildMachineNode LocalHostNode = new BuildMachineNode(System.Environment.MachineName);
+
+            BuildRoleNode ServerNode = new BuildRoleNode("Server");
+            BuildRoleNode ClientNode = new BuildRoleNode("Client");
+
+            var CurrentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
+
+            if (string.IsNullOrEmpty(LocalStagedBuildPath) && CurrentDirectory.Parent != null && CurrentDirectory.Parent.Parent != null && CurrentDirectory.Parent.Parent.Name.Equals("UE4"))
+            {
+                LocalStagedBuildPath = Path.Combine(CurrentDirectory.Parent.Parent.FullName, "ShooterGame", "Saved", "StagedBuilds");
+
+                if (!Directory.Exists(LocalStagedBuildPath))
+                {
+                    LocalStagedBuildPath = string.Empty;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(LocalStagedBuildPath))
+            {
+                var LinuxServerBuilds = Directory.GetDirectories(LocalStagedBuildPath, "LinuxServer", SearchOption.AllDirectories);
+                ServerNode.Children.Add(CreatePlatformNode("Linux", "Server", LinuxServerBuilds));
+
+                var WindowServerBuilds = Directory.GetDirectories(LocalStagedBuildPath, "WindowsServer", SearchOption.AllDirectories);
+                ServerNode.Children.Add(CreatePlatformNode("Win64", "Server", WindowServerBuilds));
+
+                var XboxOneBuilds = Directory.GetDirectories(LocalStagedBuildPath, "XboxOne", SearchOption.AllDirectories);
+                ClientNode.Children.Add(CreatePlatformNode("XboxOne", "Client", XboxOneBuilds));
+
+                var PS4Builds = Directory.GetDirectories(LocalStagedBuildPath, "PS4", SearchOption.AllDirectories);
+                ClientNode.Children.Add(CreatePlatformNode("PS4", "Client", PS4Builds));
+
+                var WindowClientBuilds = Directory.GetDirectories(LocalStagedBuildPath, "WindowsNoEditor", SearchOption.AllDirectories);
+                ClientNode.Children.Add(CreatePlatformNode("Win64", "Client", WindowClientBuilds));
+            }
+
+            LocalHostNode.Children.Add(ServerNode);
+            LocalHostNode.Children.Add(ClientNode);
+
+            return LocalHostNode;
+        }
+        public BuildPlatformNode CreatePlatformNode(PlatformType Platform, RoleType Role, int FirstEntriesCount = -1)
+        {
+            var PlatformBuilds = MongoDatabase.GetAvailableBuilds(Platform, Role);
+            if(FirstEntriesCount > -1)
+            {
+                PlatformBuilds = PlatformBuilds.GetRange(0, FirstEntriesCount);
+            }
+            var DevBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Development, Role);
+            var TestBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Test, Role);
+            var ShippingBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Shipping, Role);
+
+            var PlatformNode = new BuildPlatformNode(Platform.ToString());
+
+            PlatformNode.Children.Add(DevBuildNode);
+            PlatformNode.Children.Add(TestBuildNode);
+            PlatformNode.Children.Add(ShippingBuildNode);
+
+            return PlatformNode;
+        }
+
+        public BuildPlatformNode CreatePlatformNode(string Platform, string Role, string[] BuildDirectories)
+        {
+            var PlatformNode = new BuildPlatformNode(Platform);
+
+            var DevelopmentBuild = new BuildSolutionNode("Development");
+            var TestBuild = new BuildSolutionNode("Test");
+            var ShippingBuild = new BuildSolutionNode("Shipping");
+            var UnknownBuild = new BuildSolutionNode("Unknown");
+
+            foreach (var BuildDirectory in BuildDirectories)
+            {
+                DirectoryInfo BuildDirectoryInfo = new DirectoryInfo(BuildDirectory);
+                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("binaries") || BuildDirectoryInfo.Parent.ToString().ToLower().Equals("build"))
+                {
+                    continue;
+                }
+
+                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("development"))
+                {
+                    DevelopmentBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Development", Role, ""));
+                    continue;
+                }
+
+                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("test"))
+                {
+                    TestBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Test", Role, ""));
+                    continue;
+                }
+
+                if (BuildDirectoryInfo.Parent.ToString().ToLower().Equals("shipping"))
+                {
+                    ShippingBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Shipping", Role, ""));
+                    continue;
+                }
+
+                UnknownBuild.Children.Add(new BuildNode(false, "Local-Cooked", BuildDirectoryInfo.CreationTime.ToString(), BuildDirectory, Platform, "Unknown", Role, ""));
+            }
+
+            PlatformNode.Children.Add(DevelopmentBuild);
+            PlatformNode.Children.Add(TestBuild);
+            PlatformNode.Children.Add(ShippingBuild);
+            PlatformNode.Children.Add(UnknownBuild);
+
+            return PlatformNode;
+        }
+        public ProjectNode CreateProjectNode(Project ConfigProject)
+        {
+            ProjectNode GameProjectNode = new ProjectNode(ConfigProject.DisplayName, ConfigProject.Name);
+
+            GameProjectNode.Children.Add(CreateBuildMachineNode(ConfigProject.BuildMachine));
+            GameProjectNode.Children.Add(CreateLocalHostNode());
+
+            return GameProjectNode;
+        }
+
+        public string GetDeviceConfigFile()
+        {
+            string DeviceConfigFile = GetDeviceSaveConfigFile();
+
+            if (File.Exists(DeviceConfigFile))
+            {
+                return DeviceConfigFile;
+            }
+
+            string CurrentDirectory = Directory.GetCurrentDirectory();
+            return Path.Combine(CurrentDirectory, "DeviceConfig.json");
+        }
+        public string GetProjectConfigFile()
+        {
+            string CurrentDirectory = Directory.GetCurrentDirectory();
+            return Path.Combine(CurrentDirectory, "ProjectConfig.json");
+        }
+        public string GetDeviceSaveConfigFile()
+        {
+            string CurrentDirectory = Directory.GetCurrentDirectory();
+            string DeviceConfigFileName = string.Format("{0}-DeviceConfig.json", System.Environment.MachineName);
+            return Path.Combine(CurrentDirectory, DeviceConfigFileName);
+        }
+    }
+
+    public interface IElement
+    {
+        void Accept(IVisitor visitor);
+    }
+    public interface IVisitor
+    {
+        void Visit(IElement element);
+    }
 
     // @Hack to be able to serialize json...
     public struct PlatformConfig
@@ -1348,19 +1757,25 @@ namespace DeploymentTool
     }
 
 
-    public class ProjectNode
+    public class ProjectNode : IElement
     {
         public string Project { get; set; }
+        public string GameID { get; set; }
 
         public List<BuildMachineNode> Children { get; set; }
-        public ProjectNode(string Project)
+        public ProjectNode(string Project, string GameID)
         {
             this.Project = Project;
+            this.GameID = GameID;
             this.Children = new List<BuildMachineNode>();
+        }
+        public void Accept(IVisitor visitor)
+        {
+            visitor.Visit(this);
         }
     }
 
-    public class BuildMachineNode
+    public class BuildMachineNode : IElement
     {
         public string Machine { get; set; }
         public List<BuildRoleNode> Children { get; set; }
@@ -1369,10 +1784,14 @@ namespace DeploymentTool
             this.Machine = MachineName;
             this.Children = new List<BuildRoleNode>();
         }
+        public void Accept(IVisitor visitor)
+        {
+            visitor.Visit(this);
+        }
     }
 
-	public class BuildRoleNode
-	{
+	public class BuildRoleNode : IElement
+    {
 		public string Role { get; set; }
 		public List<BuildPlatformNode> Children { get; set; }
 		public BuildRoleNode(string Role)
@@ -1380,10 +1799,14 @@ namespace DeploymentTool
 			this.Role = Role;
 			this.Children = new List<BuildPlatformNode>();
 		}
-	}
+        public void Accept(IVisitor visitor)
+        {
+            visitor.Visit(this);
+        }
+    }
 
-	public class BuildPlatformNode
-	{
+	public class BuildPlatformNode : IElement
+    {
 		public string Platform { get; set; }
 		public List<BuildSolutionNode> Children { get; set; }
 		public BuildPlatformNode(string Platform)
@@ -1391,10 +1814,14 @@ namespace DeploymentTool
 			this.Platform = Platform;
 			this.Children = new List<BuildSolutionNode>();
 		}
-	}
+        public void Accept(IVisitor visitor)
+        {
+            visitor.Visit(this);
+        }
+    }
 
-	public class BuildSolutionNode
-	{
+	public class BuildSolutionNode : IElement
+    {
 		public string Solution { get; set; }
 		public List<BuildNode> Children { get; set; }
 		public BuildSolutionNode(string Solution)
@@ -1402,10 +1829,14 @@ namespace DeploymentTool
 			this.Solution = Solution;
 			this.Children = new List<BuildNode>();
 		}
-	}
+        public void Accept(IVisitor visitor)
+        {
+            visitor.Visit(this);
+        }
+    }
 
-	public class BuildNode
-	{
+	public class BuildNode : IElement
+    {
 		public bool UseBuild { get; set; }
 		public string Number { get; set; }
 		public string Timestamp { get; set; }
@@ -1432,7 +1863,144 @@ namespace DeploymentTool
             this.ProgressMax = 0;
             this.Status = string.Empty;
         }
-	}
+        public void Accept(IVisitor visitor)
+        {
+            visitor.Visit(this);
+        }
+    }
 
+    // Visitor classes to browser through the BuildList
+    // This engineering's cluster fuck is here to not have a foreach within a foreach within a foreach.. at a level deeper that the depth of dreams in the movie Inception
+    // It tightly coupled to the data structure at the end (as the upper level visitor needs to get a reference of the lower level visitor, see CheckAndDeploy() function
+    // Found BuildNode(s) will be in the lowest level BuildNodeVisitor instance, stored in FoundBuilds List.
+
+    public class ProjectNodeVisitor : IVisitor
+    {
+        public string ProjectName { get; set; }
+        private BuildMachineNodeVisitor MachineNodeVisitor = null;
+        public ProjectNodeVisitor(string projectName, BuildMachineNodeVisitor MachineNodeVisitorRef)
+        {
+            ProjectName = projectName;
+            MachineNodeVisitor = MachineNodeVisitorRef;
+        }
+        public void Visit(IElement element)
+        {
+            ProjectNode Project = (ProjectNode)element;
+            if (Project.GameID == ProjectName && MachineNodeVisitor != null)
+            {
+                foreach (var BMNode in Project.Children)
+                {
+                    BMNode.Accept(MachineNodeVisitor);
+                }
+            }
+        }
+    }
+    public class BuildMachineNodeVisitor : IVisitor
+    {
+        public string MachineName { get; set; }
+        private BuildRoleNodeVisitor RoleNodeVisitor = null;
+        public BuildMachineNodeVisitor(string machineName, BuildRoleNodeVisitor RoleNodeVisitorRef)
+        {
+            MachineName = machineName;
+            RoleNodeVisitor = RoleNodeVisitorRef;
+        }
+        public void Visit(IElement element)
+        {
+            BuildMachineNode Machine = (BuildMachineNode)element;
+            bool CorrectMachine = MachineName.Length == 0 || Machine.Machine == MachineName;
+            if (CorrectMachine && RoleNodeVisitor != null)
+            {
+                foreach (var BRNode in Machine.Children)
+                {
+                    BRNode.Accept(RoleNodeVisitor);
+                }
+            }
+        }
+    }
+    public class BuildRoleNodeVisitor : IVisitor
+    {
+        public string RoleName { get; set; }
+        private BuildPlatformNodeVisitor PlatformNodeVisitor = null;
+        public BuildRoleNodeVisitor(string roleName, BuildPlatformNodeVisitor PlatformNodeVisitorRef)
+        {
+            RoleName = roleName;
+            PlatformNodeVisitor = PlatformNodeVisitorRef;
+        }
+        public void Visit(IElement element)
+        {
+            BuildRoleNode Build = (BuildRoleNode)element;
+            bool CorrectRole = RoleName.Length == 0 || Build.Role == RoleName;
+            if (CorrectRole && PlatformNodeVisitor != null)
+            {
+                foreach (var BRNode in Build.Children)
+                {
+                    BRNode.Accept(PlatformNodeVisitor);
+                }
+            }
+        }
+    }
+    public class BuildPlatformNodeVisitor : IVisitor
+    {
+        public string PlatformName { get; set; }
+        private BuildSolutionNodeVisitor SolutionNodeVisitor = null;
+        public BuildPlatformNodeVisitor(string platformName, BuildSolutionNodeVisitor SolutionNodeVisitorRef)
+        {
+            PlatformName = platformName;
+            SolutionNodeVisitor = SolutionNodeVisitorRef;
+        }
+        public void Visit(IElement element)
+        {
+            BuildPlatformNode BuildPlatform = (BuildPlatformNode)element;
+            bool CorrectPlatform = PlatformName.Length == 0 || BuildPlatform.Platform == PlatformName;
+            if (CorrectPlatform && SolutionNodeVisitor != null)
+            {
+                foreach (var BSNode in BuildPlatform.Children)
+                {
+                    BSNode.Accept(SolutionNodeVisitor);
+                }
+            }
+        }
+    }
+    public class BuildSolutionNodeVisitor : IVisitor
+    {
+        public string ConfigName { get; set; }
+        private BuildNodeVisitor NodeVisitor = null;
+        public BuildSolutionNodeVisitor(string configName, BuildNodeVisitor NodeVisitorRef)
+        {
+            ConfigName = configName;
+            NodeVisitor = NodeVisitorRef;
+        }
+        public void Visit(IElement element)
+        {
+            BuildSolutionNode BuildSolution = (BuildSolutionNode)element;
+            bool CorrectConfig = ConfigName.Length == 0 || BuildSolution.Solution == ConfigName;
+            if (CorrectConfig && NodeVisitor != null)
+            {
+                foreach (var BNode in BuildSolution.Children)
+                {
+                    BNode.Accept(NodeVisitor);
+                }
+            }
+        }
+    }
+    public class BuildNodeVisitor : IVisitor
+    {
+        public string BuildNumber { get; set; }
+        public List<BuildNode> FoundBuilds { get; set; }
+        public BuildNodeVisitor(string buildNumber)
+        {
+            BuildNumber = buildNumber;
+            FoundBuilds = new List<BuildNode>();
+        }
+        public void Visit(IElement element)
+        {
+            BuildNode Node = (BuildNode)element;
+            bool CorrectBuild = BuildNumber.Length == 0 || Node.Number == BuildNumber;
+            if (CorrectBuild)
+            {
+                FoundBuilds.Add(Node);
+            }
+        }
+    }
 
 }

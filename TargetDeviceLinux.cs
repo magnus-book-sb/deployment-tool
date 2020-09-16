@@ -210,23 +210,33 @@ namespace DeploymentTool
 				{
 					Sftp.Connect();
 
-					Logger.Info(string.Format("Deleting any old build(s) from {0}/{1}", Address, DeploymentPath));
+                    DirectoryInfo BuildPathInfo = new DirectoryInfo(Build.Path);
+                    string ParentPath = BuildPathInfo.Parent.FullName;
 
-					// Delete any old builds
-					DeleteDirectory(Sftp, DeploymentPath);
+                    // Create temp path to deploy the build there for starters (prevent to remove current build if there is something wrong)
+                    string DeploymentPathTemp = string.Format("{0}NewDeployment", DeploymentPath);
 
-					if (!Sftp.Exists(DeploymentPath))
-					{
-						Sftp.CreateDirectory(DeploymentPath);
-					}
+                    // Delete existing temporary folder if any
+                    DeleteDirectory(Sftp, DeploymentPathTemp);
+                    if (!Sftp.Exists(DeploymentPathTemp))
+                    {
+                        Sftp.CreateDirectory(DeploymentPathTemp); // And recreate it after
+                    }
+                    
+                    // Upload files to temporary directory
+                    if (UploadDirectory(Callback, Sftp, ParentPath, DeploymentPathTemp, BuildPathInfo.Name))
+                    {
+                        // Upload was successful, we can replace current build
+                        Logger.Info(string.Format("Deleting any old build(s) from {0}/{1}", Address, DeploymentPath));
 
-					DirectoryInfo BuildPathInfo = new DirectoryInfo(Build.Path);
-					string ParentPath = BuildPathInfo.Parent.FullName;
+                        // Delete any old builds
+                        DeleteDirectory(Sftp, DeploymentPath);
 
-					if (UploadDirectory(Callback, Sftp, ParentPath, DeploymentPath, BuildPathInfo.Name))
-					{
-						InstallSuccess = true;
-					}
+                        // Rename from temporary name to DeploymentPath
+                        Sftp.RenameFile(DeploymentPathTemp, DeploymentPath);
+
+                        InstallSuccess = true;
+                    }
 
 					Sftp.Disconnect();
 				}
