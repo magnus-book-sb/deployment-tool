@@ -1365,33 +1365,54 @@ namespace DeploymentTool
         {
             // @HACK - Pretty Please OMFG please shoot me!!!
 
-            foreach (var Project in BuildList)
-            {
-                foreach (var BuildMachine in Project.Children)
-                {
-                    foreach (var BuildRole in BuildMachine.Children)
-                    {
-                        foreach (var Platform in BuildRole.Children)
-                        {
-                            foreach (var BuildSolution in Platform.Children)
-                            {
-                                foreach(var Build in BuildSolution.Children)
-                                {
-                                    if (SelectedBuild.Platform.Equals(Build.Platform) && 
-                                        SelectedBuild.Number.Equals(Build.Number) && 
-                                        SelectedBuild.Role.Equals(Build.Role) && 
-                                        SelectedBuild.Solution.Equals(Build.Solution))
-                                    {
-                                        return Project;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+   //         foreach (var Project in BuildList)
+   //         {
+   //             foreach (var BuildMachine in Project.Children)
+   //             {
+   //                 foreach (var BuildRole in BuildMachine.Children)
+   //                 {
+   //                     foreach (var Platform in BuildRole.Children)
+   //                     {
+   //                         foreach (var BuildSolution in Platform.Children)
+   //                         {
+   //                             foreach(var Build in BuildSolution.Children)
+   //                             {
+   //                                 if (SelectedBuild.Platform.Equals(Build.Platform) && 
+   //                                     SelectedBuild.Number.Equals(Build.Number) && 
+   //                                     SelectedBuild.Role.Equals(Build.Role) && 
+   //                                     SelectedBuild.Solution.Equals(Build.Solution))
+   //                                 {
+   //                                     return Project;
+   //                                 }
+   //                             }
+   //                         }
+   //                     }
+   //                 }
+   //             }
+   //         }
+			//return null;
 
-            return null;
+			// A proposition to replace previous code, it's still ugly but it's engineered ugly (different depth layers are hidden inside the visitor hierarchy)
+			ProjectNode MatchingProjectNode = null;
+
+			var BNodeVisitor = new BuildNodeVisitor(SelectedBuild.Number);
+			var BSolutionVisitor = new BuildSolutionNodeVisitor(SelectedBuild.Solution, BNodeVisitor);
+			var BPlatformVisitor = new BuildPlatformNodeVisitor(SelectedBuild.Platform, BSolutionVisitor);
+			var BRoleVisitor = new BuildRoleNodeVisitor(SelectedBuild.Role, BPlatformVisitor);
+			var BMachineVisitor = new BuildMachineNodeVisitor(String.Empty, BRoleVisitor);
+			var BProjectVisitor = new ProjectNodeVisitor(String.Empty, BMachineVisitor);
+
+			// search for the build we want to deploy
+			foreach (ProjectNode Project in BuildList)
+			{
+				Project.Accept(BProjectVisitor);
+				if (BNodeVisitor.FoundBuilds.Count > 0)
+				{
+					MatchingProjectNode = Project;
+					break;
+				}
+			}
+			return MatchingProjectNode;
         }
 
 		private bool IsValidBuildSelection(List<object> SelectedServerBuilds, List<object> SelectedClientBuilds)
@@ -1545,14 +1566,13 @@ namespace DeploymentTool
             BuildMachineNode BuildServerNode = new BuildMachineNode(BuildMachineName);
 
             BuildRoleNode ServerNode = new BuildRoleNode("Server");
-            int LimitToFirstBuildsCount = 250; // we know that more recent builds only are kept on the server, so check the LimitToFirstBuildsCount first build when creating a PlatformNode
-			ServerNode.Children.Add(CreatePlatformNode(PlatformType.Linux, RoleType.Server, LimitToFirstBuildsCount));
-            ServerNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Server, LimitToFirstBuildsCount));
+			ServerNode.Children.Add(CreatePlatformNode(PlatformType.Linux, RoleType.Server));
+            ServerNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Server));
 
             BuildRoleNode ClientNode = new BuildRoleNode("Client");
-            ClientNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Client, LimitToFirstBuildsCount));
-            ClientNode.Children.Add(CreatePlatformNode(PlatformType.XboxOne, RoleType.Client, LimitToFirstBuildsCount));
-            ClientNode.Children.Add(CreatePlatformNode(PlatformType.PS4, RoleType.Client, LimitToFirstBuildsCount));
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.Win64, RoleType.Client));
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.XboxOne, RoleType.Client));
+            ClientNode.Children.Add(CreatePlatformNode(PlatformType.PS4, RoleType.Client));
 
             BuildServerNode.Children.Add(ServerNode);
             BuildServerNode.Children.Add(ClientNode);
@@ -1619,16 +1639,18 @@ namespace DeploymentTool
 
             return LocalHostNode;
         }
-        public BuildPlatformNode CreatePlatformNode(PlatformType Platform, RoleType Role, int FirstEntriesCount = -1)
+        public BuildPlatformNode CreatePlatformNode(PlatformType Platform, RoleType Role)
         {
-            var PlatformBuilds = MongoDatabase.GetAvailableBuilds(Platform, Role);
-            if(FirstEntriesCount > -1)
-            {
-                PlatformBuilds = PlatformBuilds.GetRange(0, FirstEntriesCount);
-            }
-            var DevBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Development, Role);
-            var TestBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Test, Role);
-            var ShippingBuildNode = CreateBuildSolutionNode(PlatformBuilds, SolutionType.Shipping, Role);
+			//var PlatformBuilds = MongoDatabase.GetAvailableBuilds(Platform, Role); // retrieve all builds fro one platform and specific role (with all available configs)
+			// Retrieve the builds per solution/configuration
+			int FirstEntriesCount = 15; // retrieve the FirstEntriesCount builds as only those may still be on the file server (prevent slow file server check later)
+			var PlatformDevelopmentBuilds = MongoDatabase.GetAvailableBuilds(Platform, SolutionType.Development, Role, FirstEntriesCount);
+			var PlatformTestBuilds = MongoDatabase.GetAvailableBuilds(Platform, SolutionType.Test, Role, FirstEntriesCount);
+			var PlatformShippingBuilds = MongoDatabase.GetAvailableBuilds(Platform, SolutionType.Shipping, Role, FirstEntriesCount);
+
+            var DevBuildNode = CreateBuildSolutionNode(PlatformDevelopmentBuilds, SolutionType.Development, Role);
+            var TestBuildNode = CreateBuildSolutionNode(PlatformTestBuilds, SolutionType.Test, Role);
+            var ShippingBuildNode = CreateBuildSolutionNode(PlatformShippingBuilds, SolutionType.Shipping, Role);
 
             var PlatformNode = new BuildPlatformNode(Platform.ToString());
 
@@ -1885,10 +1907,11 @@ namespace DeploymentTool
         }
         public void Visit(IElement element)
         {
-            ProjectNode Project = (ProjectNode)element;
-            if (Project.GameID == ProjectName && MachineNodeVisitor != null)
-            {
-                foreach (var BMNode in Project.Children)
+			ProjectNode Project = (ProjectNode)element;
+			bool CorrectProject = ProjectName.Length == 0 || Project.GameID == ProjectName;
+			if (CorrectProject && MachineNodeVisitor != null)
+			{
+				foreach (var BMNode in Project.Children)
                 {
                     BMNode.Accept(MachineNodeVisitor);
                 }

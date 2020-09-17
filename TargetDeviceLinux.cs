@@ -222,9 +222,11 @@ namespace DeploymentTool
                     {
                         Sftp.CreateDirectory(DeploymentPathTemp); // And recreate it after
                     }
-                    
-                    // Upload files to temporary directory
-                    if (UploadDirectory(Callback, Sftp, ParentPath, DeploymentPathTemp, BuildPathInfo.Name))
+
+					var FilesToCopy = ListPathFiles(Build.Path);
+
+					// Upload files to temporary directory
+					if (UploadDirectory(Callback, Sftp, ParentPath, DeploymentPathTemp, BuildPathInfo.Name))
                     {
                         // Upload was successful, we can replace current build
                         Logger.Info(string.Format("Deleting any old build(s) from {0}/{1}", Address, DeploymentPath));
@@ -497,6 +499,14 @@ namespace DeploymentTool
 			DirectoryInfo BuildInfo = new DirectoryInfo(Build.Path);
 			string FullBuildDeploymentPath = Path.Combine(DeploymentPath, BuildInfo.Name).Replace("\\", "/");
 			return FullBuildDeploymentPath;
+		}
+
+		private List<string> ListPathFiles(string SourcePath)
+		{
+			List<string> FileList = new List<string>();
+			FileList.Add(SourcePath);
+			FileList.AddRange(Directory.GetFileSystemEntries(SourcePath, "**", SearchOption.AllDirectories));
+			return FileList;
 		}
 
 		private bool UploadDirectory(IDeploymentSession Callback, SftpClient Sftp, string SourcePath, string DestinationPath, string DirSearchPattern)

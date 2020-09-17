@@ -76,17 +76,22 @@ namespace DeploymentTool
 			var Records = Collection.Find(Filter);
 			return Records.ToList();
 		}
+		public List<BuildRecord> SelectAvailableBuildsSortedAndLimited(FilterDefinition<BuildRecord> Filter, SortDefinition<BuildRecord> Sort, int? FirstBuildsCount)
+		{
+			var Collection = Database.GetCollection<BuildRecord>("BuildRecord");
+			var Records = Collection.Find(Filter).Sort(Sort).Limit(FirstBuildsCount);
+			return Records.ToList();
+		}
 
-		public List<BuildRecord> GetAvailableBuilds(PlatformType Platform, SolutionType Solution, RoleType Role)
+		public List<BuildRecord> GetAvailableBuilds(PlatformType Platform, SolutionType Solution, RoleType Role, int? FirstBuildsCount = null)
 		{
 			var FilterBuilder = new FilterDefinitionBuilder<BuildRecord>();
 			var Filter = FilterBuilder.Eq("Platform", Platform.ToString()) &
 						 FilterBuilder.Eq("Solution", Solution.ToString()) &
 						 FilterBuilder.Eq("GameType", Role.ToString());
 
-			var AvailableBuilds = SelectAvailableBuilds(Filter);
-
-			AvailableBuilds.Sort((x, y) => DateTime.Compare(y.Timestamp, x.Timestamp));
+			var SortObj = Builders<BuildRecord>.Sort.Descending("datetime");
+			var AvailableBuilds = SelectAvailableBuildsSortedAndLimited(Filter, SortObj, FirstBuildsCount);
 
 			return AvailableBuilds;
 		}
