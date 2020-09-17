@@ -185,6 +185,10 @@ namespace DeploymentTool
             {
                 ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Success);
             }
+			else
+			{
+				Console.WriteLine(string.Format("Build [{0}] has been successfully deployed on device [{1}]", Build.Number, Device.Name));
+			}
             Callback.OnDeploymentDone(this);
         }
 
@@ -194,7 +198,12 @@ namespace DeploymentTool
             {
                 ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Failure);
             }
-            Callback.OnDeploymentDone(this);
+			else
+			{
+				Console.WriteLine(string.Format("Following error happened while deploying build [{0}] to device [{1}] : {2}", Build.Number, Device.Name, ErrorMessage));
+			}
+
+			Callback.OnDeploymentDone(this);
         }
 
         public void OnBuildDeployedAborted(ITargetDevice Device, BuildNode Build)
@@ -204,7 +213,11 @@ namespace DeploymentTool
             {
                 ThreadHelperClass.SetDeviceDeploymentResult(WinForm, DeviceView, Device, BuildDeploymentResult.Aborted);
             }
-            Callback.OnDeploymentDone(this);
+			else
+			{
+				Console.WriteLine(string.Format("Deployment of build [{0}] to device [{1}] has been aborted !", Build.Number, Device.Name));
+			}
+			Callback.OnDeploymentDone(this);
         }
     }
 
