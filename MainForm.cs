@@ -195,7 +195,7 @@ namespace DeploymentTool
             Console.WriteLine("-role RoleName (expected values are Server | Client )");
             Console.WriteLine("-platform PlatformName (expected values are Linux | Win64 | PS4 )");
             Console.WriteLine("-config ConfigName (expected values are Development | Test | Shipping )");
-            Console.WriteLine("-buildnumber <JenkinsBuildNumber>-<P4CLNumber> (available builds number will be checked against that number)");
+            Console.WriteLine("-buildnumber [<JenkinsBuildNumber>-]<P4CLNumber> (available builds number will be checked against that number, if only P4CLNumber is given first build number ending with same P4CLNumber will be used)");
             Console.WriteLine("-devices deviceName1 [ deviceName2, ... ] (device(s) to deploy to, if there is more than one device separate them with a space)");
             Console.WriteLine("");
             Console.WriteLine("Example :");
@@ -264,7 +264,13 @@ namespace DeploymentTool
             ProjectNode SelectedBuild = null;
             BuildNode SelectedBuildNode = null;
 
-            var BNodeVisitor = new BuildNodeVisitor(CommandLineArgs[BuildNumberKey][0]);
+			// deduce build and partial build number depending on '-' is found in the string
+			string BuildOrPartialBuildNumber = CommandLineArgs[BuildNumberKey][0];
+			bool BuildStringHasSeparator = BuildOrPartialBuildNumber.Contains('-');
+			string DeducedBuildNumber = BuildStringHasSeparator ? BuildOrPartialBuildNumber : string.Empty;
+			string DeducedPartialBuildNumber = BuildStringHasSeparator ? string.Empty : BuildOrPartialBuildNumber;
+
+			var BNodeVisitor = new BuildNodeVisitor(DeducedBuildNumber, DeducedPartialBuildNumber);
             var BSolutionVisitor = new BuildSolutionNodeVisitor(CommandLineArgs[ConfigKey][0], BNodeVisitor);
             var BPlatformVisitor = new BuildPlatformNodeVisitor(CommandLineArgs[PlatformKey][0], BSolutionVisitor);
             var BRoleVisitor = new BuildRoleNodeVisitor(CommandLineArgs[RoleKey][0], BPlatformVisitor);
@@ -2009,16 +2015,20 @@ namespace DeploymentTool
     public class BuildNodeVisitor : IVisitor
     {
         public string BuildNumber { get; set; }
-        public List<BuildNode> FoundBuilds { get; set; }
-        public BuildNodeVisitor(string buildNumber)
+		public string BuildNumberCLPart { get; set; }
+		public List<BuildNode> FoundBuilds { get; set; }
+        public BuildNodeVisitor(string buildNumber, string buildNumberChangelist = "")
         {
             BuildNumber = buildNumber;
-            FoundBuilds = new List<BuildNode>();
+			BuildNumberCLPart = buildNumberChangelist;
+			FoundBuilds = new List<BuildNode>();
         }
         public void Visit(IElement element)
         {
             BuildNode Node = (BuildNode)element;
-            bool CorrectBuild = BuildNumber.Length == 0 || Node.Number == BuildNumber;
+			bool MatchPartialBuildNumber = BuildNumberCLPart.Length > 0 && Node.Number.EndsWith(BuildNumberCLPart);
+			bool NoFilteringNeeded = (BuildNumberCLPart.Length == 0 && BuildNumber.Length == 0);
+			bool CorrectBuild = MatchPartialBuildNumber || NoFilteringNeeded || Node.Number == BuildNumber;
             if (CorrectBuild)
             {
                 FoundBuilds.Add(Node);
