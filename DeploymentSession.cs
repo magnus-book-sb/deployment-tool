@@ -38,7 +38,8 @@ namespace DeploymentTool
 	{
         bool Ping();
 		bool DeployBuild(BuildNode Build, IDeploymentSession Callback, CancellationToken Token);
-        bool IsProcessRunning();
+		bool StartBuild(CancellationToken Token);
+		bool IsProcessRunning();
         bool StartProcess();
         bool StopProcess();
         bool UseDevice { get; set; }

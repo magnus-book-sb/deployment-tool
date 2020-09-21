@@ -105,8 +105,12 @@ namespace DeploymentTool
         {
             throw new NotImplementedException();
         }
+		public virtual bool StartBuild(CancellationToken Token)
+		{
+			throw new NotImplementedException();
+		}
 
-        public virtual bool IsProcessRunning()
+		public virtual bool IsProcessRunning()
         {
             throw new NotImplementedException();
         }

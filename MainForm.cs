@@ -16,10 +16,18 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.VisualBasic;
+using System.Text.RegularExpressions;
 
 namespace DeploymentTool
 {
-    public class ConsoleApp : IDeploymentCallback
+	public enum ConsoleAppMode : ushort
+	{
+		DeployAndStartDS = 0, // Default mode when no mode or deploystart is 
+		StartDS
+	}
+
+
+	public class ConsoleApp : IDeploymentCallback
     {
         private List<ProjectNode> BuildList = new List<ProjectNode>();
 
@@ -33,15 +41,21 @@ namespace DeploymentTool
 
         private List<string> DevicesNotFound = new List<string>();
 
-        private bool ArgumentsAreOk = true;
+		private ConsoleAppMode Mode = ConsoleAppMode.DeployAndStartDS;
 
-        private const string BuildNumberKey = "buildnumber";
+		private bool ArgumentsAreOk = true;
+		// ConsoleAppMode.DeployAndStartDS related arguments
+		private const string BuildNumberKey = "buildnumber";
         private const string ConfigKey = "config";
         private const string PlatformKey = "platform";
         private const string RoleKey = "role";
         private const string ProjectKey = "project";
         private const string DevicesKey = "devices";
-        private const string LongHelpKey = "-help"; // if --help is in the arguments
+		// ConsoleAppMode.StartDS related arguments
+		private const string DeviceKey = "device";
+		private const string OverrideLevelKey = "level";
+		// help arguments
+		private const string LongHelpKey = "-help"; // if --help is in the arguments
         private const string ShortHelpKey = "h"; // if -h is in the arguments
 
         public ConsoleApp()
@@ -138,8 +152,8 @@ namespace DeploymentTool
             string LastFoundKey = string.Empty;
             for(int ItArg = 0, ItArgEnd = clArgs.Length; ItArg < ItArgEnd; ++ItArg)
             {
-                string Arg = clArgs[ItArg];
-                if(Arg.StartsWith("-"))
+                string Arg = Regex.Replace(clArgs[ItArg], @"\r\n?|\n", "");
+				if (Arg.StartsWith("-"))
                 {
                     // we want to retrieve arguments starting with "-" as a key and following argument(s), not starting with "-" as its value
                     LastFoundKey = Arg.Substring(1);
@@ -150,8 +164,18 @@ namespace DeploymentTool
                     if(LastFoundKey.Length > 0)
                     {
                         List<string> Values = CommandLineArgs[LastFoundKey];
-                        Values.Add(Arg);
+						Values.Add(Arg);
                     }
+					else if(ItArg == 0)
+					{
+						// first parameter doest not start with '-', consider it as the console mode
+						Mode = ConsoleAppMode.DeployAndStartDS;
+						bool DoesMatch = Arg == "startds";
+						if (Arg == "startds")
+						{
+							Mode = ConsoleAppMode.StartDS;
+						}
+					}
                 }
             }
 
@@ -161,15 +185,33 @@ namespace DeploymentTool
                 PrintUsageAndExit();
             }
 
-            // check if needed arguments have a value
-            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(ProjectKey);
-            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(RoleKey);
-            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(PlatformKey);
-            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(ConfigKey);
-            ArgumentsAreOk = ArgumentsAreOk && IsNeededArgumentSet(BuildNumberKey);
+			// check if needed arguments have a value
+			List<string> SearchedDeviceName = new List<string>();
+			if (Mode == ConsoleAppMode.DeployAndStartDS)
+			{
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(ProjectKey);
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(RoleKey);
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(PlatformKey);
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(ConfigKey);
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(BuildNumberKey);
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(DevicesKey);
+				if(ArgumentsAreOk)
+				{
+					SearchedDeviceName = CommandLineArgs[DevicesKey];
+				}
+			}
+			else
+			{
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(ProjectKey);
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(OverrideLevelKey, false);
+				ArgumentsAreOk = ArgumentsAreOk && CheckArgument(DeviceKey);
+				if (ArgumentsAreOk)
+				{
+					SearchedDeviceName = CommandLineArgs[DeviceKey];
+				}
+			}
 
             // set DevicesNotFound using CommandLineArgs[DevicesKey] entries
-            List<string> SearchedDeviceName = CommandLineArgs[DevicesKey];
             foreach (string UnmatchedDevName in SearchedDeviceName)
             {
                 DevicesNotFound.Add(UnmatchedDevName);
@@ -190,7 +232,10 @@ namespace DeploymentTool
         private void PrintUsage()
         {
             Console.WriteLine("");
-            Console.WriteLine("DeploymentTool command line is expecting the following arguments :");
+			Console.WriteLine("DeploymentTool command line can be run in different modes :");
+			Console.WriteLine("deploystart (by default) | startds");
+
+			Console.WriteLine("** deploystart mode is expecting the following arguments :");
             Console.WriteLine("-project ProjectName (check ProjectConfig.json to see available project names)");
             Console.WriteLine("-role RoleName (expected values are Server | Client )");
             Console.WriteLine("-platform PlatformName (expected values are Linux | Win64 | PS4 )");
@@ -199,9 +244,18 @@ namespace DeploymentTool
             Console.WriteLine("-devices deviceName1 [ deviceName2, ... ] (device(s) to deploy to, if there is more than one device separate them with a space)");
             Console.WriteLine("");
             Console.WriteLine("Example :");
-            Console.WriteLine("DeploymentTool -project ShooterGame -role Server -platform Linux -config Test -buildnumber 3194-439744 -devices 127.0.0.1 192.0.0.2");
+            Console.WriteLine("DeploymentTool [deploystart] -project ShooterGame -role Server -platform Linux -config Test -buildnumber 3194-439744 -devices 127.0.0.1 192.0.0.2");
             Console.WriteLine("");
-        }
+
+			Console.WriteLine("** startds mode is expecting the following arguments :");
+			Console.WriteLine("-project ProjectName (check ProjectConfig.json to see available project names)");
+			Console.WriteLine("-level LevelName (optional, override level used in device 'arguments' parameter from DeviceConfig.json)");
+			Console.WriteLine("-device deviceName (device on which the dedicated server will be restarted)");
+			Console.WriteLine("");
+			Console.WriteLine("Example :");
+			Console.WriteLine("DeploymentTool startds -level Level_Stealth_Prototype -device 127.0.0.1");
+			Console.WriteLine("");
+		}
 
         private void PrintUsageAndExit()
         {
@@ -236,7 +290,7 @@ namespace DeploymentTool
             return FoundDevice;
         }
 
-        private bool IsNeededArgumentSet(string ArgName)
+        private bool CheckArgument(string ArgName, bool MandatoryArg = true)
         {
             List<string> ArgValue;
             if (CommandLineArgs.TryGetValue(ArgName, out ArgValue))
@@ -252,13 +306,44 @@ namespace DeploymentTool
             }
             else
             {
-                Console.WriteLine(string.Format("Missing argument -{0}", ArgName));
-            }
+				if(MandatoryArg)
+				{
+					Console.WriteLine(string.Format("Missing argument -{0}", ArgName));
+					return false;
+				}
+				else
+				{
+					return true;
+				}
+			}
             return false;
         }
 
-        // This function will exit the process (with 1 if an error happened, or 0 if deploy is successful)
-        public void CheckAndDeploy()
+		public ConsoleAppMode GetConsoleMode() { return Mode; }
+
+		public Project GetProjectMatchingName(string SearchedName)
+		{
+			Project SelectedProject = null;
+			var ConfiguredProjects = new List<Project>();
+			using (StreamReader Stream = new StreamReader(DeployCommon.GetProjectConfigFile()))
+			{
+				ConfiguredProjects.AddRange(JsonConvert.DeserializeObject<List<Project>>(Stream.ReadToEnd()));
+			}
+
+			foreach (var ConfiguredProject in ConfiguredProjects)
+			{
+				if (ConfiguredProject.DisplayName == SearchedName || ConfiguredProject.Name == SearchedName)
+				{
+					SelectedProject = ConfiguredProject;
+					break;
+				}
+			}
+
+			return SelectedProject;
+		}
+
+		// This function will exit the process (with 1 if an error happened, or 0 if deploy is successful)
+		public void CheckAndDeploy()
         {
             // set ProjectNode and BuildNode with the build to retrieve
             ProjectNode SelectedBuild = null;
@@ -295,21 +380,7 @@ namespace DeploymentTool
             }
 
             // retrieve Project matching ConfiguredProjects name
-            Project SelectedProject = null;
-            var ConfiguredProjects = new List<Project>();
-            using (StreamReader Stream = new StreamReader(DeployCommon.GetProjectConfigFile()))
-            {
-                ConfiguredProjects.AddRange(JsonConvert.DeserializeObject<List<Project>>(Stream.ReadToEnd()));
-            }
-
-            foreach (var ConfiguredProject in ConfiguredProjects)
-            {
-                if (ConfiguredProject.DisplayName == SelectedBuild.Project)
-                {
-                    SelectedProject = ConfiguredProject;
-                    break;
-                }
-            }
+            Project SelectedProject = GetProjectMatchingName(SelectedBuild.Project);
 
             if (SelectedProject == null)
             {
@@ -367,6 +438,65 @@ namespace DeploymentTool
         {
             DeploySessions.Remove(Session);
         }
+
+		public void StartDedicatedServer()
+		{
+			// retrieve Project matching ConfiguredProjects name
+			Project SelectedProject = GetProjectMatchingName(CommandLineArgs[ProjectKey][0]);
+
+			if (SelectedProject == null)
+			{
+				PrintErrorAndExit("Unable to retrieve a matching ConfiguredProject from ProjectConfig.json");
+			}
+
+			// search for device(s) we need to connect to to start the dedicated server
+			List<ITargetDevice> SelectedDevices = new List<ITargetDevice>();
+			foreach (PlatformNode PNode in DeviceList)
+			{
+				foreach (ITargetDevice Device in PNode.Children)
+				{
+					if (IsWantedDevice(Device.Name))
+					{
+						SelectedDevices.Add(Device);
+					}
+				}
+			}
+
+			if (SelectedDevices.Count == 0)
+			{
+				PrintErrorAndExit("Unable to found any matching device(s) from DeviceConfig.json");
+			}
+			// print if any devices that have not been found
+			foreach (string NotFoundDev in DevicesNotFound)
+			{
+				Console.WriteLine(string.Format("Device [{0}] have not been found in DeviceConfig.json, ignoring this device !", NotFoundDev));
+			}
+
+			var CancellationTaskTokenSource = new CancellationTokenSource();
+
+			// Modify device CmdLineArguments if we want a different level
+			string WantedLevelName = CommandLineArgs.ContainsKey(OverrideLevelKey) ? CommandLineArgs[OverrideLevelKey][0] : string.Empty;
+			string SavedCmdLineArguments = SelectedDevices[0].CmdLineArguments;
+			if(WantedLevelName.Length > 0)
+			{
+				string AfterLevelCmdLine = SelectedDevices[0].CmdLineArguments.Remove(0, SelectedDevices[0].CmdLineArguments.IndexOf(' ') + 1);
+				SelectedDevices[0].CmdLineArguments = string.Format("{0} {1}", WantedLevelName, AfterLevelCmdLine);
+			}
+			
+			// StartBuild task on the found device (the task is stopping the process and restarting it after)
+			SelectedDevices[0].ProjectConfig = SelectedProject;
+			if( SelectedDevices[0].StartBuild(CancellationTaskTokenSource.Token) )
+			{
+				Console.WriteLine(string.Format("Dedicated server has been successfully started on device [{0}] with the following command line :", SelectedDevices[0].Name));
+				Console.WriteLine(string.Format("{0}", SelectedDevices[0].CmdLineArguments));
+			}
+			else
+			{
+				Console.WriteLine(string.Format("Unable to start dedicated server on device [{0}] !", SelectedDevices[0].Name));
+			}
+
+			SelectedDevices[0].CmdLineArguments = SavedCmdLineArguments; // Not needed, there to not forget if we have to do the same with several devices
+		}
     }
 
     public partial class MainForm : Form, IDeploymentCallback

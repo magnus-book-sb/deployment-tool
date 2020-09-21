@@ -21,7 +21,16 @@ namespace DeploymentTool
                 CommandLineApp.ProcessCommandLineArgs(commandLineArgs);
 
                 CommandLineApp.RetrieveBuildsAndDevices();
-                CommandLineApp.CheckAndDeploy();
+
+				ConsoleAppMode CurrentMode = CommandLineApp.GetConsoleMode();
+				if (CurrentMode == ConsoleAppMode.DeployAndStartDS)
+				{
+					CommandLineApp.CheckAndDeploy();
+				}
+				else if (CurrentMode == ConsoleAppMode.StartDS)
+				{
+					CommandLineApp.StartDedicatedServer();
+				}
 
             }
 			else

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -162,6 +163,32 @@ namespace DeploymentTool
 			
 			return CheckCancelationRequestAndReport();
 		}
+		public override bool StartBuild(CancellationToken Token)
+		{
+			this.Token = Token;
+			this.Build = null;
+
+			try
+			{
+				if (!StopProcesses())
+				{
+					return CheckCancelationRequestAndReport();
+				}
+
+				if (!StartProcess())
+				{
+					return CheckCancelationRequestAndReport();
+				}
+
+				return true;
+			}
+			catch (Exception e)
+			{
+				Logger.Error(string.Format("StartBuild failed with error {1}", e.Message));
+			}
+
+			return CheckCancelationRequestAndReport();
+		}
 
 		private bool ResetProgress()
 		{
@@ -264,10 +291,13 @@ namespace DeploymentTool
 			try
 			{
 				// Increase progress once when stop processes is started
-				Build.Progress++;
-				Build.Status = "Stopping Processes";
+				if(Build != null)
+				{
+					Build.Progress++;
+					Build.Status = "Stopping Processes";
+				}
 
-                string GameProjectName = ProjectConfig.Name; // GetGameProjectName();
+				string GameProjectName = ProjectConfig.Name; // GetGameProjectName();
 
 				string DedicatedTestServerName = string.Format("{0}Server-Linux-Test", GameProjectName);
 				if (!StopProcess(DedicatedTestServerName))
@@ -288,7 +318,10 @@ namespace DeploymentTool
 				}
 
 				// Increase progress when stop processes is finished.
-				Build.Progress++;
+				if (Build != null)
+				{
+					Build.Progress++;
+				}
 				return true;
 			}
 			catch(Exception e)
@@ -387,8 +420,11 @@ namespace DeploymentTool
 			try
 			{
 				// Increase progress when start process is started
-				Build.Progress++;
-				Build.Status = "Starting Process";
+				if (Build != null)
+				{
+					Build.Progress++;
+					Build.Status = "Starting Process";
+				}
 
 				if (Token.IsCancellationRequested)
 				{
@@ -397,7 +433,7 @@ namespace DeploymentTool
 
 				Logger.Info(string.Format("Starting dedicated server process '{0}' on Linux machine: {1}. Cmd Line Args: {2}", LinuxServerProcessName, Address, CmdLineArguments));
 				// Get the full path including the build directory.
-				string FullBuildDeploymentPath = GetFullBuildDeploymentPath();
+				string FullBuildDeploymentPath = Build != null ? GetFullBuildDeploymentPath() : RetrieveDeploymentPathFromDevice();
 
                 string CrashReportClientPath = Path.Combine(FullBuildDeploymentPath, "Engine", "Binaries", "Linux").Replace("\\", "/");
                 // Change access permissions for  crash report client
@@ -428,12 +464,15 @@ namespace DeploymentTool
                     ProcessID = GetProcessID();
                 }
 
-                // Increase progress when start process is finished.
-                Build.Progress++;
+				// Increase progress when start process is finished.
+				if (Build != null)
+				{
+					Build.Progress++;
+				}
 
                 if (GetProcessID() == -1)
                 {
-                    Logger.Error(string.Format("Failed to start process '{0}' for build '{1}' on target device '{2}'", LinuxServerProcessName, Build.Number, Address));
+                    Logger.Error(string.Format("Failed to start process '{0}' for build '{1}' on target device '{2}'", LinuxServerProcessName, Build != null ? Build.Number : "(not available)", Address));
                     return false;
                 }
 
@@ -443,12 +482,12 @@ namespace DeploymentTool
                     return false;
                 }
 
-                Logger.Info(string.Format("Start process '{0}' successful for build '{1}' on target device '{2}'", LinuxServerProcessName, Build.Number, Address));
+                Logger.Info(string.Format("Start process '{0}' successful for build '{1}' on target device '{2}'", LinuxServerProcessName, Build != null ? Build.Number : "(not available)", Address));
                 return true;
             }
             catch (Exception e)
 			{
-				Logger.Error(string.Format("Start process '{0}' threw an exception for build '{1}' on target device '{2}'. Ex: {3}", LinuxServerProcessName, Build.Number, Address, e.Message));
+				Logger.Error(string.Format("Start process '{0}' threw an exception for build '{1}' on target device '{2}'. Ex: {3}", LinuxServerProcessName, Build != null ? Build.Number : "(not available)", Address, e.Message));
 			}
 
 			return false;
@@ -480,17 +519,18 @@ namespace DeploymentTool
 
         private string GetLinuxDedicatedProcessName()
 		{
-            string LinuxServerProcessName = string.Format("{0}Server", ProjectConfig.Name); 
+            string LinuxServerProcessName = string.Format("{0}Server", ProjectConfig.Name);
 
-			if (Build.Solution.Equals(SolutionType.Test.ToString()))
+			string BuildConfig = Build != null ? Build.Solution : RetrieveDeployedBuildConfigFromDevice();
+
+			if (BuildConfig.Equals(SolutionType.Test.ToString()))
 			{
 				LinuxServerProcessName = string.Format("{0}-Linux-Test", LinuxServerProcessName);
 			}
-			else if (Build.Solution.Equals(SolutionType.Shipping.ToString()))
+			else if (BuildConfig.Equals(SolutionType.Shipping.ToString()))
 			{
 				LinuxServerProcessName = string.Format("{0}-Linux-Shipping", LinuxServerProcessName);
 			}
-
 			return LinuxServerProcessName;
 		}
 
@@ -499,6 +539,67 @@ namespace DeploymentTool
 			DirectoryInfo BuildInfo = new DirectoryInfo(Build.Path);
 			string FullBuildDeploymentPath = Path.Combine(DeploymentPath, BuildInfo.Name).Replace("\\", "/");
 			return FullBuildDeploymentPath;
+		}
+
+		private string RetrieveDeploymentPathFromDevice()
+		{
+			var CommandResult = GetCommand().Execute(string.Format("ls {0}", DeploymentPath));
+
+			string CleanedCommandRes = Regex.Replace(CommandResult, @"\r\n?|\n", "");
+			string[] Folders = CleanedCommandRes.Split(' ');
+
+			// Kill all processes with the current name running on the Linux machine.
+			foreach (var FolderName in Folders)
+			{
+				if (string.IsNullOrEmpty(FolderName))
+				{
+					continue;
+				}
+
+				if (FolderName.Contains(ProjectConfig.Name))
+				{
+					string DeducedPath = string.Format("{0}/{1}", DeploymentPath, FolderName);
+					Logger.Info(string.Format("Following deployment path was deduced from the device : {0}", DeducedPath));
+					return DeducedPath;
+				}
+			}
+			Logger.Info(string.Format("Unable to retrieve deployment path from the device, searching folder {0} !", DeploymentPath));
+			return string.Empty;
+		}
+
+		private string RetrieveDeployedBuildConfigFromDevice()
+		{
+			var CommandResult = GetCommand().Execute(string.Format("ls {0}", DeploymentPath));
+
+			string CleanedCommandRes = Regex.Replace(CommandResult, @"\r\n?|\n", "");
+			string[] Folders = CleanedCommandRes.Split(' ');
+
+			// Kill all processes with the current name running on the Linux machine.
+			foreach (var FolderName in Folders)
+			{
+				if (string.IsNullOrEmpty(FolderName))
+				{
+					continue;
+				}
+
+				if (FolderName.Contains(ProjectConfig.Name))
+				{
+					Match ConfigMatch = Regex.Match(FolderName, @"ShooterGame-[^-]+-(.+)(?=Server)", RegexOptions.IgnoreCase);
+					if(ConfigMatch.Success)
+					{
+						string RetrievedValue = ConfigMatch.Groups[1].Captures[0].Value;
+						Logger.Info(string.Format("Config {0} was deduced from device build folder {1}", RetrievedValue, FolderName));
+						return RetrievedValue;
+					}
+					else
+					{
+						Logger.Info(string.Format("Unable to retrieve Config from device build folder {0} !", FolderName));
+						return string.Empty;
+					}
+				}
+			}
+			Logger.Info(string.Format("Unable to find build folder from the device, searching folder {0} !", DeploymentPath));
+			return string.Empty;
 		}
 
 		private List<string> ListPathFiles(string SourcePath)
