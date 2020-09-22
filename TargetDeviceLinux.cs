@@ -472,7 +472,12 @@ namespace DeploymentTool
 
                 if (GetProcessID() == -1)
                 {
-                    Logger.Error(string.Format("Failed to start process '{0}' for build '{1}' on target device '{2}'", LinuxServerProcessName, Build != null ? Build.Number : "(not available)", Address));
+					int DebugProcessId = GetProcessIdUsingProjectName();
+					if(DebugProcessId > -1)
+					{
+						Logger.Warning(string.Format("process '{0}' on target device '{1}' has been found using GetProcessIdUsingProjectName()", DebugProcessId, Address));
+					}
+					Logger.Error(string.Format("Failed to start process '{0}' for build '{1}' on target device '{2}'", LinuxServerProcessName, Build != null ? Build.Number : "(not available)", Address));
                     return false;
                 }
 
@@ -559,7 +564,7 @@ namespace DeploymentTool
 				if (FolderName.Contains(ProjectConfig.Name))
 				{
 					string DeducedPath = string.Format("{0}/{1}", DeploymentPath, FolderName);
-					Logger.Info(string.Format("Following deployment path was deduced from the device : {0}", DeducedPath));
+					Logger.Info(string.Format("Following deployment path was found on the device : {0}", DeducedPath));
 					return DeducedPath;
 				}
 			}
@@ -732,5 +737,71 @@ namespace DeploymentTool
             return ProcessID;
         }
 
-    }
+		public int GetProcessIdUsingProjectName()
+		{
+			int ProcessID = -1;
+			string ReturnValue = string.Empty, LogInfo = string.Empty, LogError = string.Empty;
+
+			try
+			{
+				string AbsoluteBinaryPath = string.Empty;
+				string DeviceDeploymentPath = RetrieveDeploymentPathFromDevice();
+
+				var PSResult = GetCommand().Execute(string.Format("ps -eo cmd | grep {0}", ProjectConfig.Name));
+				string[] Processes = PSResult.Split('\n');
+
+				// Retrieve process cmd starting with the deployment path (first one will be retrieved at least)
+				foreach (var ProcessCmd in Processes)
+				{
+					if (string.IsNullOrEmpty(ProcessCmd))
+					{
+						continue;
+					}
+
+					if (ProcessCmd.StartsWith(DeviceDeploymentPath))
+					{
+						AbsoluteBinaryPath = ProcessCmd.Substring(0, ProcessCmd.IndexOf(' '));
+						Logger.Info(string.Format("Following process matching project name '{0}' on device '{1}' has been found : {2}", ProjectConfig.Name, Address, ProcessCmd));
+						break;
+					}
+				}
+
+				// If the process name has been found, use pidof with full absolute process path
+				if(AbsoluteBinaryPath != string.Empty)
+				{
+					var CmdResult = SshCommand.ExecuteCommand(Logger, string.Format("pidof {0}", AbsoluteBinaryPath), this, out ReturnValue, out LogInfo, out LogError);
+					if (CmdResult == CommandResult.Failure)
+					{
+						Logger.Warning(string.Format("[pidof {0}] command failed on Linux device '{1}'. {2}. {3}. {4}.", AbsoluteBinaryPath, Address, ReturnValue, LogInfo, LogError));
+						return ProcessID;
+					}
+
+					string[] ProcessIds = ReturnValue.Split(' ');
+
+					foreach (var ProcessId in ProcessIds)
+					{
+						if (string.IsNullOrEmpty(ProcessId))
+						{
+							continue;
+						}
+
+						int.TryParse(ProcessId, out ProcessID);
+						break; // break at first non null process string
+					}
+				}
+				else
+				{
+					Logger.Warning(string.Format("No running process(es) found that matches the path {0} on device '{1}'!", DeviceDeploymentPath, Address));
+				}
+			}
+			catch (Exception e)
+			{
+				Logger.Warning(string.Format("[GetProcessIdUsingProjectName] Failed to get process id for process '{0}' on Linux device '{1}'. {2}. {3}. {4}. Ex: {5}", GetLinuxDedicatedProcessName(), Address, ReturnValue, LogInfo, LogError, e.Message));
+			}
+
+			return ProcessID;
+		}
+
+
+	}
 }
