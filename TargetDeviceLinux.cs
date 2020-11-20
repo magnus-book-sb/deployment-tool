@@ -372,7 +372,7 @@ namespace DeploymentTool
 
 					Logger.Info(string.Format("Stopping dedicated server '{0}' with process id {1}", ProcessName, ProcessID));
 
-                    GetCommand().Execute(string.Format("kill -9 {0}", ProcessID));
+                    GetCommand().Execute(string.Format("kill -9 {0} ; ping -c 5 127.0.0.1", ProcessID)); // kill process and wait 5 seconds
 				}
 
 				return (IsProcessRunning(ProcessName) == false);
